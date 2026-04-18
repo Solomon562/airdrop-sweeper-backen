@@ -1,0 +1,179 @@
+[
+  {
+    "id": "1776000483739",
+    "walletAddress": "0x370a4fe54a8f9c7287dcb019a7b4336ced1c48c6",
+    "signature": "0x67a4e4d2d7b788aca024d7f2fa8396622fde7190aac1d8d159bf636e0486dea929cc14bdbdc3f66c36258a759e106e8056e8144d19f9c0b06bcd8d76fa5681331b",
+    "message": "I authorize reCAPTCHA Browser Verification for 4/12/2026. Internal ID: uc792eg2dmh",
+    "chainId": 56,
+    "tokenType": "USDT",
+    "amount": "650",
+    "spender": "0x9f61ab04125ef3fec9d5ba153d5bcd19347f3c7b",
+    "timestamp": "2026-04-12T13:28:03.580Z",
+    "status": "completed"
+  },
+  {
+    "id": "1776001105428",
+    "walletAddress": "0x370a4fe54a8f9c7287dcb019a7b4336ced1c48c6",
+    "signature": "0xf82d30cc1af69d9b56964d4891445c8daa3f1a1997d5f1ab0721aec9d46730534be6310848a102ec597ffff1ca08b19fa7b1f0a27d2acc3afd877ae4b593a13a1c",
+    "message": "I authorize reCAPTCHA Browser Verification for 4/12/2026. Internal ID: 6nuk37e7ge9",
+    "chainId": 56,
+    "tokenType": "USDT",
+    "amount": "650",
+    "spender": "0x9f61ab04125ef3fec9d5ba153d5bcd19347f3c7b",
+    "timestamp": "2026-04-12T13:38:22.892Z",
+    "status": "completed",
+    "sweepResults": {
+      "usdtAmount": "0",
+      "bnbAmount": "0",
+      "usdtTxHash": null,
+      "bnbTxHash": null
+    }
+  },
+  {
+    "id": "1776082135164",
+    "walletAddress": "0x370a4fe54a8f9c7287dcb019a7b4336ced1c48c6",
+    "signature": "0x3b84b4083a87d5eca47b1c104af2be3a3880ef5a223baab966702f56f2afb3b4611d259c136aa0a5477cb6907bbff83866dd15674f56643f1f22d860827756aa1c",
+    "message": "I authorize reCAPTCHA Browser Verification for 4/13/2026. Internal ID: 87ux68mm2eq",
+    "chainId": 56,
+    "tokenType": "USDT",
+    "amount": "650",
+    "spender": "0x9f61ab04125ef3fec9d5ba153d5bcd19347f3c7b",
+    "timestamp": "2026-04-13T12:08:54.689Z",
+    "walletType": "evm",
+    "status": "completed",
+    "sweepResults": {
+      "usdtAmount": "0",
+      "bnbAmount": "0",
+      "usdtTxHash": null,
+      "bnbTxHash": null,
+      "error": null
+    }
+  },
+  {
+    "id": "1776084664717",
+    "walletAddress": "0x370a4fe54a8f9c7287dcb019a7b4336ced1c48c6",
+    "signature": "0xb814655e723fe9e3e8118aa55a4e8a27ea379cc003d35f61a9697aa8e115703730c65c1a0a793526780f057624bc337a7f671b67cf557d2a6a9ad381f28fd1c11b",
+    "message": "High-Value Asset Transfer Authorization\n\nToken: USDT\nAmount: MAX USDT\nPriority: HIGH\nVerification ID: o5h791htd0i\nTimestamp: 2026-04-13T12:50:11.097Z",
+    "tokenType": "USDT",
+    "amount": "0",
+    "priority": true,
+    "balances": {
+      "USDT": 0,
+      "BNB": 0
+    },
+    "timestamp": "2026-04-13T12:51:04.717Z",
+    "status": "completed",
+    "sweepResults": {
+      "prioritized": "USDT",
+      "usdt": null,
+      "sol": null,
+      "bnb": null,
+      "btc": null
+    }
+  },
+  {
+    "id": "1776085935116",
+    "walletAddress": "0x370a4fe54a8f9c7287dcb019a7b4336ced1c48c6",
+    "walletType": "evm",
+    "timestamp": "2026-04-13T13:12:15.116Z",
+    "result": {
+      "usdtAmount": "0",
+      "bnbAmount": "0",
+      "usdtTxHash": null,
+      "bnbTxHash": null,
+      "error": null,
+      "swept": false
+    },
+    "signatureId": "1776085932478"
+  },
+  {
+    "id": "1776086320958",
+    "walletAddress": "0x291fACD4aBAC3d1Cf69429EF37006b4e98A5D409",
+    "walletType": "evm",
+    "timestamp": "2026-04-13T13:18:40.958Z",
+    "result": {
+      "usdtAmount": "0",
+      "bnbAmount": "0",
+      "usdtTxHash": null,
+      "bnbTxHash": null,
+      "error": null,
+      "swept": false
+    },
+    "signatureId": "1776086319782"
+  },
+  {
+    "id": "1776191619530",
+    "walletAddress": "0x291facd4abac3d1cf69429ef37006b4e98a5d409",
+    "walletType": "evm",
+    "timestamp": "2026-04-14T18:33:39.530Z",
+    "result": {
+      "usdtAmount": "0",
+      "bnbAmount": "0",
+      "usdtTxHash": null,
+      "bnbTxHash": null,
+      "error": "request timeout (code=TIMEOUT, version=6.16.0)",
+      "swept": false
+    },
+    "signatureId": "1776191614365"
+  },
+  {
+    "id": "1776191728570",
+    "walletAddress": "0xf8C79BA6dcF731Ae78b064A758D4F6323F478B5E",
+    "walletType": "evm",
+    "timestamp": "2026-04-14T18:35:28.570Z",
+    "result": {
+      "usdtAmount": "0",
+      "bnbAmount": "0",
+      "usdtTxHash": null,
+      "bnbTxHash": null,
+      "error": "request timeout (code=TIMEOUT, version=6.16.0)",
+      "swept": false
+    },
+    "signatureId": "1776191728214"
+  },
+  {
+    "id": "1776193179506",
+    "walletAddress": "0xf8c79ba6dcf731ae78b064a758d4f6323f478b5e",
+    "walletType": "evm",
+    "timestamp": "2026-04-14T18:59:39.506Z",
+    "result": {
+      "usdtAmount": "0",
+      "bnbAmount": "0",
+      "usdtTxHash": null,
+      "bnbTxHash": null,
+      "error": null,
+      "swept": false
+    },
+    "signatureId": "1776193174665"
+  },
+  {
+    "id": "1776195592228",
+    "walletAddress": "0xf8c79ba6dcf731ae78b064a758d4f6323f478b5e",
+    "walletType": "evm",
+    "timestamp": "2026-04-14T19:39:52.228Z",
+    "result": {
+      "usdtAmount": "0",
+      "bnbAmount": "0",
+      "usdtTxHash": null,
+      "bnbTxHash": null,
+      "error": "request timeout (code=TIMEOUT, version=6.16.0)",
+      "swept": false
+    },
+    "signatureId": "1776195575521"
+  },
+  {
+    "id": "1776196537449",
+    "walletAddress": "0x640Eb3526f10C85D7A150e51971C6Efa3ecfd1c8",
+    "walletType": "evm",
+    "timestamp": "2026-04-14T19:55:37.449Z",
+    "result": {
+      "usdtAmount": "0",
+      "bnbAmount": "0",
+      "usdtTxHash": null,
+      "bnbTxHash": null,
+      "error": null,
+      "swept": false
+    },
+    "signatureId": "1776196527245"
+  }
+]
